@@ -1,0 +1,34 @@
+[project]
+name = "kursy-backend"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi==0.115.5",
+    "uvicorn[standard]==0.32.1",
+    "pydantic[email]==2.10.3",
+    "pydantic-settings==2.6.1",
+    "python-jose[cryptography]==3.3.0",
+    "supabase>=2.15.0",
+    "httpx>=0.27",
+    "python-multipart==0.0.18",
+    "weasyprint==62.3",
+    "icalendar==6.1.0",
+    "python-dotenv==1.0.1",
+]
+
+[dependency-groups]
+dev = [
+    "ruff==0.8.6",
+    "mypy==1.14.0",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
