@@ -8,8 +8,7 @@ import type { Club, TrainingWeek, TrainingSession, Location, Profile, ClubTopic,
 import { DAY_NAMES } from "@/types";
 import { formatTime, formatWeekRange, offsetWeek, getCurrentMonday } from "@/lib/utils/date";
 import { createClient } from "@/lib/supabase/client";
-import { copyWeek, exportIcal } from "@/lib/api";
-import { buttonVariants } from "@/components/ui/button";
+import { copyWeek } from "@/lib/api";
 import { SessionCard } from "./SessionCard";
 import { SessionEditModal, type SessionSaveData } from "./SessionEditModal";
 
@@ -406,13 +405,6 @@ export function WeeklyPlanEditor({
             </button>
             {week && (
               <>
-                <a
-                  href={exportIcal(week.id)}
-                  download
-                  className={buttonVariants({ variant: "outline", size: "sm" }) + " h-8 text-xs"}
-                >
-                  iCal
-                </a>
                 {isAdmin && (
                   <button
                     onClick={togglePublish}

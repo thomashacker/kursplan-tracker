@@ -81,10 +81,6 @@ export function copyWeek(sourceWeekId: string, targetWeekStart: string) {
   });
 }
 
-export function exportIcal(weekId: string): string {
-  return `${API_URL}/wochen/${weekId}/export.ics`;
-}
-
 // ──────────────────────────────────────────────────────────
 // Account API
 // ──────────────────────────────────────────────────────────

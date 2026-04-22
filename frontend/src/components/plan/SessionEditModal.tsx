@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import type { TrainingSession, Location, Profile, ClubTopic, ClubSessionType } from "@/types";
 import { DAY_NAMES } from "@/types";
 import { Input } from "@/components/ui/input";
@@ -42,74 +42,113 @@ interface Props {
   onClose: () => void;
 }
 
-// ── small helpers ─────────────────────────────────────────────
+// ── Multi-select tag dropdown ─────────────────────────────────
 
-function CheckList({
-  items,
-  selected,
-  onToggle,
+function MultiTagSelect({
   label,
+  options,
+  selected,
+  onAdd,
+  onRemove,
+  placeholder,
   emptyText,
 }: {
-  items: { id: string; label: string }[];
-  selected: string[];
-  onToggle: (id: string) => void;
   label: string;
+  options: { id: string; label: string }[];
+  selected: string[];
+  onAdd: (id: string) => void;
+  onRemove: (id: string) => void;
+  placeholder?: string;
   emptyText?: string;
 }) {
-  if (items.length === 0) return emptyText ? (
-    <p className="text-sm text-muted-foreground">{emptyText}</p>
-  ) : null;
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const available = options.filter((o) => !selected.includes(o.id));
 
   return (
     <div className="space-y-1.5">
-      <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{label}</Label>
-      <div className="border border-input rounded-xl divide-y divide-border overflow-hidden">
-        {items.map((item) => {
-          const checked = selected.includes(item.id);
-          return (
-            <label
-              key={item.id}
-              className="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-secondary/50 transition-colors"
-            >
-              <div className={`shrink-0 w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${checked ? "bg-primary border-primary" : "border-input bg-background"}`}>
-                {checked && (
-                  <svg width="9" height="7" viewBox="0 0 9 7" fill="none">
-                    <path d="M1 3.5L3.5 6L8 1" stroke="white" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                )}
-              </div>
-              <input type="checkbox" className="sr-only" checked={checked} onChange={() => onToggle(item.id)} />
-              <span className="text-sm">{item.label}</span>
-            </label>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
+      <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+        {label}
+      </Label>
 
-function ChipToggle({
-  value,
-  selected,
-  onToggle,
-}: {
-  value: string;
-  selected: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onToggle}
-      className={`inline-flex items-center h-7 px-3 rounded-full text-xs font-medium border transition-colors ${
-        selected
-          ? "bg-primary text-primary-foreground border-primary"
-          : "bg-background border-input text-muted-foreground hover:border-primary/50 hover:text-foreground"
-      }`}
-    >
-      {value}
-    </button>
+      {/* Selected tags */}
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-1">
+          {selected.map((id) => {
+            const opt = options.find((o) => o.id === id);
+            return (
+              <span
+                key={id}
+                className="inline-flex items-center gap-1 h-6 pl-2.5 pr-1.5 rounded-full text-xs font-medium bg-primary/10 text-primary border border-primary/20"
+              >
+                {opt?.label ?? id}
+                <button
+                  type="button"
+                  onClick={() => onRemove(id)}
+                  className="flex items-center justify-center w-3.5 h-3.5 rounded-full hover:bg-primary/20 transition-colors"
+                  aria-label={`${opt?.label ?? id} entfernen`}
+                >
+                  <svg width="7" height="7" viewBox="0 0 8 8" fill="none">
+                    <path d="M1 1l6 6M7 1L1 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                  </svg>
+                </button>
+              </span>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Dropdown trigger + menu */}
+      {options.length === 0 ? (
+        <p className="text-xs text-muted-foreground">
+          {emptyText ?? "Keine Optionen verfügbar."}
+        </p>
+      ) : (
+        <div ref={ref} className="relative">
+          <button
+            type="button"
+            onClick={() => setOpen((o) => !o)}
+            className="w-full h-9 px-3 rounded-xl border border-input bg-background text-sm text-left flex items-center justify-between hover:border-ring transition-colors"
+          >
+            <span className="text-muted-foreground">
+              {available.length === 0 ? "Alle ausgewählt" : (placeholder ?? "Auswählen…")}
+            </span>
+            <svg
+              width="12" height="12" viewBox="0 0 12 12" fill="none"
+              className={`shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
+            >
+              <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+
+          {open && available.length > 0 && (
+            <div className="absolute z-50 mt-1 w-full rounded-xl border border-border bg-popover shadow-md overflow-hidden">
+              {available.map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => { onAdd(opt.id); setOpen(false); }}
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-secondary transition-colors"
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -130,20 +169,18 @@ export function SessionEditModal({
   const [dayOfWeek, setDayOfWeek] = useState<number>(session?.day_of_week ?? defaultDay);
   const [locationId, setLocationId] = useState<string>(session?.location_id ?? "none");
 
-  // Multi-trainer
   const initTrainers: string[] = session?.session_trainers?.length
     ? session.session_trainers.map((st) => st.user_id)
     : session?.trainer_id ? [session.trainer_id] : [];
   const [selectedTrainerIds, setSelectedTrainerIds] = useState<string[]>(initTrainers);
-
-  // Multi-topic (from club_topics)
   const [selectedTopics, setSelectedTopics] = useState<string[]>(session?.topics ?? []);
-
-  // Multi-type (from club_session_types)
   const [selectedTypes, setSelectedTypes] = useState<string[]>(session?.session_types ?? []);
 
-  function toggleItem<T extends string>(setter: React.Dispatch<React.SetStateAction<T[]>>, id: T) {
-    setter((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  function add<T extends string>(setter: React.Dispatch<React.SetStateAction<T[]>>, id: T) {
+    setter((prev) => prev.includes(id) ? prev : [...prev, id]);
+  }
+  function remove<T extends string>(setter: React.Dispatch<React.SetStateAction<T[]>>, id: T) {
+    setter((prev) => prev.filter((x) => x !== id));
   }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -200,48 +237,27 @@ export function SessionEditModal({
             </div>
           </div>
 
-          {/* Session types – chip toggles from club_session_types */}
-          {sessionTypes.length > 0 ? (
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Typ</Label>
-              <div className="flex flex-wrap gap-2">
-                {sessionTypes.map((t) => (
-                  <ChipToggle
-                    key={t.id}
-                    value={t.name}
-                    selected={selectedTypes.includes(t.name)}
-                    onToggle={() => toggleItem(setSelectedTypes, t.name)}
-                  />
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Typ</Label>
-              <p className="text-xs text-muted-foreground">
-                Noch keine Typen. Füge sie im Tab{" "}
-                <span className="font-medium text-foreground">Themen & Orte</span> hinzu.
-              </p>
-            </div>
-          )}
+          {/* Typ */}
+          <MultiTagSelect
+            label="Typ"
+            options={sessionTypes.map((t) => ({ id: t.name, label: t.name }))}
+            selected={selectedTypes}
+            onAdd={(id) => add(setSelectedTypes, id)}
+            onRemove={(id) => remove(setSelectedTypes, id)}
+            placeholder="Typ hinzufügen…"
+            emptyText="Noch keine Typen – füge sie im Tab Themen & Orte hinzu."
+          />
 
-          {/* Topics – checkbox list from club_topics */}
-          {topics.length > 0 ? (
-            <CheckList
-              label="Themen"
-              items={topics.map((t) => ({ id: t.name, label: t.name }))}
-              selected={selectedTopics}
-              onToggle={(name) => toggleItem(setSelectedTopics, name)}
-            />
-          ) : (
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Themen</Label>
-              <p className="text-xs text-muted-foreground">
-                Noch keine Themen. Füge sie im Tab{" "}
-                <span className="font-medium text-foreground">Themen & Orte</span> hinzu.
-              </p>
-            </div>
-          )}
+          {/* Themen */}
+          <MultiTagSelect
+            label="Themen"
+            options={topics.map((t) => ({ id: t.name, label: t.name }))}
+            selected={selectedTopics}
+            onAdd={(id) => add(setSelectedTopics, id)}
+            onRemove={(id) => remove(setSelectedTopics, id)}
+            placeholder="Thema hinzufügen…"
+            emptyText="Noch keine Themen – füge sie im Tab Themen & Orte hinzu."
+          />
 
           {/* Location */}
           <div className="space-y-1.5">
@@ -261,12 +277,14 @@ export function SessionEditModal({
             </Select>
           </div>
 
-          {/* Trainers */}
-          <CheckList
+          {/* Trainer */}
+          <MultiTagSelect
             label="Trainer"
-            items={trainers.map((t) => ({ id: t.id, label: t.full_name }))}
+            options={trainers.map((t) => ({ id: t.id, label: t.full_name }))}
             selected={selectedTrainerIds}
-            onToggle={(id) => toggleItem(setSelectedTrainerIds, id)}
+            onAdd={(id) => add(setSelectedTrainerIds, id)}
+            onRemove={(id) => remove(setSelectedTrainerIds, id)}
+            placeholder="Trainer hinzufügen…"
             emptyText="Keine Trainer oder Admins im Verein."
           />
 

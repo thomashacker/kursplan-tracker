@@ -47,12 +47,12 @@ export default async function PlanPage({
     .eq("week_start", weekStart)
     .single<TrainingWeek>();
 
-  // Fetch locations, club trainers/admins, topics, and session types in parallel
-  const [{ data: locations }, { data: clubMembers }, { data: topics }, { data: sessionTypes }] = await Promise.all([
+  // Fetch locations, trainer user_ids, topics, and session types in parallel
+  const [{ data: locations }, { data: trainerMemberships }, { data: topics }, { data: sessionTypes }] = await Promise.all([
     supabase.from("locations").select("*").eq("club_id", club.id).returns<Location[]>(),
     supabase
       .from("club_memberships")
-      .select("user_id, role, profiles(id, full_name)")
+      .select("user_id")
       .eq("club_id", club.id)
       .eq("status", "active")
       .in("role", ["admin", "trainer"]),
@@ -70,10 +70,13 @@ export default async function PlanPage({
       .returns<ClubSessionType[]>(),
   ]);
 
-  type MemberWithProfile = { user_id: string; role: string; profiles: Profile | null };
-  const trainers: Profile[] = ((clubMembers ?? []) as unknown as MemberWithProfile[])
-    .map((m) => m.profiles)
-    .filter((p): p is Profile => p !== null);
+  // Fetch profiles separately to avoid the transitive FK join issue with PostgREST
+  const trainerIds = (trainerMemberships ?? []).map((m) => m.user_id);
+  const { data: trainerProfiles } = trainerIds.length
+    ? await supabase.from("profiles").select("id, full_name, avatar_url, username, created_at").in("id", trainerIds).returns<Profile[]>()
+    : { data: [] };
+
+  const trainers: Profile[] = trainerProfiles ?? [];
 
   return (
     <WeeklyPlanEditor
