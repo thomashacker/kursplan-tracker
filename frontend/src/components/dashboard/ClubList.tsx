@@ -85,10 +85,12 @@ function ClubCard({ membership, index }: { membership: ClubMembership; index: nu
 export function ClubList({
   memberships,
   userName,
+  userEmail,
   canCreateClub,
 }: {
   memberships: ClubMembership[];
   userName: string;
+  userEmail: string;
   canCreateClub: boolean;
 }) {
   const reduced = useReducedMotion();
@@ -160,18 +162,37 @@ export function ClubList({
             >
               Noch kein Verein.
             </p>
-            <p className="text-sm text-muted-foreground mb-6 max-w-xs">
-              {canCreateClub
-                ? "Erstelle deinen ersten Verein und lade Trainer und Mitglieder ein."
-                : "Du wirst einem Verein hinzugefügt, sobald ein Administrator dich einlädt."}
-            </p>
-            {canCreateClub && (
-              <Link
-                href="/dashboard/verein/neu"
-                className="inline-flex items-center gap-2 h-11 px-5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:opacity-90 transition-opacity"
-              >
-                Ersten Verein erstellen
-              </Link>
+            {canCreateClub ? (
+              <>
+                <p className="text-sm text-muted-foreground mb-6 max-w-xs">
+                  Erstelle deinen ersten Verein und lade Trainer und Mitglieder ein.
+                </p>
+                <Link
+                  href="/dashboard/verein/neu"
+                  className="inline-flex items-center gap-2 h-11 px-5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:opacity-90 transition-opacity"
+                >
+                  Ersten Verein erstellen
+                </Link>
+              </>
+            ) : (
+              <div className="max-w-sm w-full">
+                <p className="text-sm text-muted-foreground mb-5">
+                  Du hast noch keinen Zugang zu einem Verein.
+                </p>
+                <div className="rounded-xl border border-border bg-background/60 px-4 py-3.5 text-left space-y-1">
+                  <p className="text-xs font-semibold text-foreground">So bekommst du Zugang:</p>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Bitte den Administrator deines Vereins, dich mit deiner E-Mail-Adresse einzuladen.
+                    Du bekommst dann automatisch Zugang, sobald du eingeloggt bist.
+                  </p>
+                  {userEmail && (
+                    <p className="text-xs text-muted-foreground pt-0.5">
+                      Deine E-Mail:{" "}
+                      <span className="font-mono font-medium text-foreground select-all">{userEmail}</span>
+                    </p>
+                  )}
+                </div>
+              </div>
             )}
           </div>
         </motion.div>

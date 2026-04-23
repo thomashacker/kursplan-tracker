@@ -19,7 +19,8 @@ export default async function DashboardPage() {
     .returns<ClubMembership[]>();
 
   const userName = (user?.user_metadata?.full_name as string | undefined) ?? "";
+  const userEmail = user?.email ?? "";
   const canCreateClub = (user?.app_metadata?.can_create_club as boolean | undefined) === true;
 
-  return <ClubList memberships={memberships ?? []} userName={userName} canCreateClub={canCreateClub} />;
+  return <ClubList memberships={memberships ?? []} userName={userName} userEmail={userEmail} canCreateClub={canCreateClub} />;
 }
