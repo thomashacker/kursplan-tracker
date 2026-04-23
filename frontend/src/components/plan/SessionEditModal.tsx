@@ -251,6 +251,7 @@ export function SessionEditModal({
   const isRecurring = !isNew && Boolean(session?.template_id);
 
   const [saving, setSaving] = useState(false);
+  const [pendingData, setPendingData] = useState<SessionSaveData | null>(null);
   const [dayOfWeek, setDayOfWeek] = useState<number>(session?.day_of_week ?? defaultDay);
   const [locationId, setLocationId] = useState<string>(session?.location_id ?? "none");
 
@@ -278,10 +279,9 @@ export function SessionEditModal({
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    setSaving(true);
     const form = new FormData(e.currentTarget);
 
-    await onSave({
+    const data: SessionSaveData = {
       day_of_week: dayOfWeek,
       time_start: form.get("time_start") as string,
       time_end: form.get("time_end") as string,
@@ -294,12 +294,62 @@ export function SessionEditModal({
       is_recurring: isNew ? makeRecurring : false,
       edit_scope: editScope,
       auto_extend: autoExtend,
-    });
+    };
 
+    // Require extra confirmation when overwriting all future recurring sessions
+    if (isRecurring && editScope === "future") {
+      setPendingData(data);
+      return;
+    }
+
+    setSaving(true);
+    await onSave(data);
+    setSaving(false);
+  }
+
+  async function handleConfirmFuture() {
+    if (!pendingData) return;
+    setSaving(true);
+    setPendingData(null);
+    await onSave(pendingData);
     setSaving(false);
   }
 
   return (
+    <>
+    {/* ── Confirmation dialog for "apply to all future" ── */}
+    {pendingData && (
+      <Dialog open onOpenChange={(isOpen) => { if (!isOpen) setPendingData(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold" style={{ fontFamily: "var(--font-syne, system-ui)" }}>
+              Alle zukünftigen aktualisieren?
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground leading-relaxed">
+            Diese Änderung wird auf <span className="font-semibold text-foreground">alle zukünftigen Wiederholungen</span> dieser Sitzung angewendet. Bereits individuell angepasste Einheiten werden überschrieben.
+          </p>
+          <DialogFooter className="pt-2">
+            <button
+              type="button"
+              onClick={() => setPendingData(null)}
+              className="h-10 px-4 rounded-xl border border-border text-sm font-medium hover:bg-secondary transition-colors"
+            >
+              Abbrechen
+            </button>
+            <button
+              type="button"
+              disabled={saving}
+              onClick={handleConfirmFuture}
+              className="h-10 px-5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold disabled:opacity-40 hover:opacity-90 transition-opacity"
+            >
+              {saving ? "Speichern…" : "Ja, alle aktualisieren"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    )}
+
     <Dialog open onOpenChange={(isOpen: boolean) => !isOpen && onClose()}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
@@ -496,5 +546,6 @@ export function SessionEditModal({
         </form>
       </DialogContent>
     </Dialog>
+    </>
   );
 }
