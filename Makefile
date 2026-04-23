@@ -65,6 +65,10 @@ db-push: ## Apply migrations to Supabase (requires supabase CLI)
 db-reset: ## Reset local Supabase DB and re-apply migrations + seed
 	supabase db reset
 
+db-fresh: ## Apply full schema to a brand-new Supabase project (SQL Editor)
+	@echo "Paste supabase/schema.sql into the Supabase SQL Editor for a fresh project."
+	@echo "Requires pg_cron enabled (Dashboard → Database → Extensions)."
+
 # ─────────────────────────────────────────────
 # Clean
 # ─────────────────────────────────────────────
