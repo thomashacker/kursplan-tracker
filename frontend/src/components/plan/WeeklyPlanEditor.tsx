@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useEffect } from "react";
+import { useState, useTransition, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { motion, useReducedMotion } from "framer-motion";
@@ -557,6 +557,8 @@ export function WeeklyPlanEditor({
   const [view, setView] = useState<View>("week");
   const [selectedDay, setSelectedDay] = useState<number | null>(null); // drill-down
   const [hasChanges, setHasChanges] = useState(false);
+  const [hasRemoteChanges, setHasRemoteChanges] = useState(false);
+  const suppressRealtimeRef = useRef(false);
   const [, startTransition] = useTransition();
 
   // Delete confirm dialog state
@@ -567,10 +569,40 @@ export function WeeklyPlanEditor({
   useEffect(() => {
     setWeek(initialWeek);
     setHasChanges(false);
+    setHasRemoteChanges(false);
+    suppressRealtimeRef.current = false;
   }, [initialWeek]);
 
   // When week changes (URL nav), reset day drill-down
   useEffect(() => { setSelectedDay(null); }, [weekStart]);
+
+  // Realtime: watch for changes made by other users on the same week
+  useEffect(() => {
+    if (!week?.id) return;
+    const supabase = createClient();
+    const channel = supabase
+      .channel(`week-${week.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "training_sessions", filter: `week_id=eq.${week.id}` },
+        (payload) => {
+          console.log("[Realtime] training_sessions change:", payload);
+          if (!suppressRealtimeRef.current) setHasRemoteChanges(true);
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "training_weeks", filter: `id=eq.${week.id}` },
+        (payload) => {
+          console.log("[Realtime] training_weeks change:", payload);
+          if (!suppressRealtimeRef.current) setHasRemoteChanges(true);
+        }
+      )
+      .subscribe((status, err) => {
+        console.log("[Realtime] subscription status:", status, err ?? "");
+      });
+    return () => { supabase.removeChannel(channel); };
+  }, [week?.id]);
 
 
   const sessions    = week?.training_sessions ?? [];
@@ -605,6 +637,7 @@ export function WeeklyPlanEditor({
 
   async function togglePublish(scope: "single" | "future" = "single") {
     if (!week) return;
+    suppressRealtimeRef.current = true;
     const supabase = createClient();
     const newVal = !week.is_published;
 
@@ -630,6 +663,7 @@ export function WeeklyPlanEditor({
   }
 
   async function handleCopyFromLastWeek() {
+    suppressRealtimeRef.current = true;
     const prevMonday = offsetWeek(weekStart, -1);
     const supabase   = createClient();
     const { data: prevWeek } = await supabase
@@ -750,6 +784,7 @@ export function WeeklyPlanEditor({
   }
 
   async function handleSaveSession(data: SessionSaveData) {
+    suppressRealtimeRef.current = true;
     const supabase = createClient();
     const { trainer_ids, is_recurring, edit_scope, auto_extend, ...sessionData } = data;
     const sessionFields = { ...sessionData, trainer_id: trainer_ids[0] ?? null, guest_trainers: data.guest_trainers };
@@ -890,6 +925,7 @@ export function WeeklyPlanEditor({
 
   async function executeDelete() {
     if (!deleteTarget) return;
+    suppressRealtimeRef.current = true;
     const { sessionId, templateId } = deleteTarget;
     const supabase = createClient();
 
@@ -943,6 +979,32 @@ export function WeeklyPlanEditor({
 
   return (
     <div>
+      {/* ── Remote changes banner ─────────────────────────── */}
+      {hasRemoteChanges && (
+        <motion.div
+          initial={{ opacity: 0, y: -6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={spring}
+          className="mb-4 flex items-center gap-3 rounded-xl border border-primary/30 bg-primary/8 px-4 py-3"
+        >
+          <span className="w-2 h-2 rounded-full bg-primary animate-pulse shrink-0" />
+          <p className="text-sm font-medium flex-1">Plan wurde von jemand anderem aktualisiert.</p>
+          <button
+            onClick={() => { setHasRemoteChanges(false); startTransition(() => router.refresh()); }}
+            className="text-xs font-semibold text-primary hover:opacity-75 transition-opacity whitespace-nowrap"
+          >
+            Neu laden →
+          </button>
+          <button
+            onClick={() => setHasRemoteChanges(false)}
+            className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
+            aria-label="Schließen"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </motion.div>
+      )}
+
       {/* ── Navigation header ─────────────────────────────── */}
       <div className="flex flex-col gap-3 mb-6">
         <div className="flex items-center gap-2 flex-wrap">

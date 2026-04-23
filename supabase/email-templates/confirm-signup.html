@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <title>E-Mail bestätigen – Kurs.Y</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f5f0eb;font-family:'DM Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;-webkit-font-smoothing:antialiased;">
+
+  <!--[if mso]><table width="100%" cellpadding="0" cellspacing="0"><tr><td><![endif]-->
+
+  <!-- Outer wrapper -->
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+         style="background-color:#f5f0eb;min-height:100vh;">
+    <tr>
+      <td align="center" style="padding:48px 16px;">
+
+        <!-- Card -->
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0"
+               style="width:100%;max-width:500px;background-color:#faf7f4;border-radius:20px;border:1px solid #e8e0d8;overflow:hidden;">
+
+          <!-- Top accent bar -->
+          <tr>
+            <td style="height:4px;background:linear-gradient(90deg,#c0392b 0%,#e74c3c 50%,#c0392b 100%);font-size:0;line-height:0;">&nbsp;</td>
+          </tr>
+
+          <!-- Header -->
+          <tr>
+            <td style="padding:36px 40px 0 40px;">
+
+              <!-- Wordmark -->
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="padding-right:10px;vertical-align:middle;">
+                    <!-- Logo icon (circle + dashed ring) -->
+                    <div style="width:30px;height:30px;background-color:#c0392b;border-radius:8px;display:inline-block;text-align:center;line-height:30px;">
+                      <img src="https://kursy.app/icon.png" width="30" height="30"
+                           alt="" style="display:block;border-radius:8px;"
+                           onerror="this.style.display='none'" />
+                    </div>
+                  </td>
+                  <td style="vertical-align:middle;">
+                    <span style="font-size:13px;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;color:#888;font-family:'DM Sans',-apple-system,sans-serif;">Kurs.Y</span>
+                  </td>
+                </tr>
+              </table>
+
+            </td>
+          </tr>
+
+          <!-- Divider -->
+          <tr>
+            <td style="padding:28px 40px 0 40px;">
+              <div style="height:1px;background-color:#e8e0d8;font-size:0;line-height:0;">&nbsp;</div>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:36px 40px 0 40px;">
+
+              <!-- Heading -->
+              <h1 style="margin:0 0 16px 0;font-size:26px;font-weight:700;color:#2a1f1a;line-height:1.2;font-family:Georgia,'Times New Roman',serif;letter-spacing:-0.02em;">
+                Willkommen bei Kurs.Y
+              </h1>
+
+              <!-- Body text -->
+              <p style="margin:0 0 28px 0;font-size:15px;line-height:1.7;color:#6b5c54;">
+                Bestätige deine E-Mail-Adresse, um dein Konto zu aktivieren und loszulegen.
+              </p>
+
+              <!-- CTA button -->
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="border-radius:12px;background-color:#c0392b;">
+                    <a href="{{ .ConfirmationURL }}"
+                       style="display:inline-block;padding:15px 32px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:12px;font-family:'DM Sans',-apple-system,sans-serif;letter-spacing:0.01em;">
+                      E-Mail bestätigen &rarr;
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Expiry note -->
+              <p style="margin:20px 0 0 0;font-size:13px;color:#a89a92;">
+                Dieser Link ist 24 Stunden gültig.
+              </p>
+
+            </td>
+          </tr>
+
+          <!-- Divider -->
+          <tr>
+            <td style="padding:32px 40px 0 40px;">
+              <div style="height:1px;background-color:#e8e0d8;font-size:0;line-height:0;">&nbsp;</div>
+            </td>
+          </tr>
+
+          <!-- Fallback link -->
+          <tr>
+            <td style="padding:20px 40px 0 40px;">
+              <p style="margin:0;font-size:12px;line-height:1.6;color:#b5a89e;">
+                Funktioniert der Button nicht? Kopiere diesen Link in deinen Browser:
+              </p>
+              <p style="margin:6px 0 0 0;font-size:12px;word-break:break-all;">
+                <a href="{{ .ConfirmationURL }}" style="color:#c0392b;text-decoration:none;">{{ .ConfirmationURL }}</a>
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding:24px 40px 36px 40px;">
+              <p style="margin:0;font-size:12px;color:#c5b8b0;">
+                Du hast kein Konto bei Kurs.Y erstellt? Diese E-Mail einfach ignorieren.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+        <!-- /Card -->
+
+        <!-- Footer note -->
+        <p style="margin:20px 0 0 0;font-size:12px;color:#b5a89e;text-align:center;">
+          &copy; 2026 Kurs.Y &middot; <a href="https://kursy.app" style="color:#b5a89e;text-decoration:none;">kursy.app</a>
+        </p>
+
+      </td>
+    </tr>
+  </table>
+
+  <!--[if mso]></td></tr></table><![endif]-->
+
+</body>
+</html>
