@@ -11,24 +11,16 @@ help: ## Show this help
 # ─────────────────────────────────────────────
 # Setup
 # ─────────────────────────────────────────────
-.PHONY: setup setup-frontend setup-backend
-setup: setup-frontend setup-backend ## Install all dependencies (frontend + backend)
-
-setup-frontend: ## Install frontend npm dependencies, create .env.local
+.PHONY: setup
+setup: ## Install frontend dependencies, create .env.local
 	$(MAKE) -C frontend setup
 
-setup-backend: ## Create Python venv, install backend dependencies, create .env
-	$(MAKE) -C backend setup
-
 # ─────────────────────────────────────────────
-# Dev servers (run each in a separate terminal)
+# Dev
 # ─────────────────────────────────────────────
-.PHONY: dev-frontend dev-backend
-dev-frontend: ## Start frontend dev server  (localhost:3000)
+.PHONY: dev
+dev: ## Start frontend dev server (localhost:3000)
 	$(MAKE) -C frontend dev
-
-dev-backend: ## Start backend dev server   (localhost:8000)
-	$(MAKE) -C backend dev
 
 # ─────────────────────────────────────────────
 # Build
@@ -40,25 +32,20 @@ build: ## Build frontend for production
 # ─────────────────────────────────────────────
 # Quality
 # ─────────────────────────────────────────────
-.PHONY: lint check format test
-test: ## Run frontend unit tests (Vitest)
+.PHONY: lint check test
+test: ## Run unit tests (Vitest)
 	$(MAKE) -C frontend test
 
-lint: ## Run linters (frontend ESLint + backend ruff)
+lint: ## Run ESLint
 	$(MAKE) -C frontend lint
-	$(MAKE) -C backend lint
 
-format: ## Auto-format backend code with ruff
-	$(MAKE) -C backend format
-
-check: ## Type-check frontend (tsc) and backend (mypy)
+check: ## TypeScript type-check
 	$(MAKE) -C frontend check
-	$(MAKE) -C backend check
 
 # ─────────────────────────────────────────────
 # Database
 # ─────────────────────────────────────────────
-.PHONY: db-push db-reset
+.PHONY: db-push db-reset db-fresh
 db-push: ## Apply migrations to Supabase (requires supabase CLI)
 	supabase db push
 
@@ -73,6 +60,5 @@ db-fresh: ## Apply full schema to a brand-new Supabase project (SQL Editor)
 # Clean
 # ─────────────────────────────────────────────
 .PHONY: clean
-clean: ## Remove build artifacts and caches
+clean: ## Remove build artifacts
 	$(MAKE) -C frontend clean
-	$(MAKE) -C backend clean
