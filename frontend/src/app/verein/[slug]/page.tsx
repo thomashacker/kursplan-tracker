@@ -76,9 +76,11 @@ export default async function PublicPlanPage({
     )
   )];
   const { data: trainerProfiles } = allTrainerIds.length
-    ? await supabase.from("profiles").select("id, full_name").in("id", allTrainerIds)
+    ? await supabase.from("profiles").select("id, full_name, avatar_url").in("id", allTrainerIds)
     : { data: [] };
-  const profileMap = Object.fromEntries((trainerProfiles ?? []).map((p) => [p.id, p.full_name as string]));
+  const profileMap = Object.fromEntries(
+    (trainerProfiles ?? []).map((p) => [p.id, { name: p.full_name as string, avatarUrl: p.avatar_url as string | null }])
+  );
 
   // Build serializable flat list
   const now = new Date();
@@ -97,7 +99,16 @@ export default async function PublicPlanPage({
       const trainerIds = session.session_trainers?.length
         ? (session.session_trainers as { user_id: string }[]).map((st) => st.user_id)
         : session.trainer_id ? [session.trainer_id] : [];
-      const trainerNames = trainerIds.map((id) => profileMap[id]).filter(Boolean);
+      const registeredTrainers = trainerIds
+        .map((id) => profileMap[id])
+        .filter((p): p is { name: string; avatarUrl: string | null } => Boolean(p));
+      const guestTrainers: { name: string; avatarUrl: null; isGuest: true }[] =
+        (session.guest_trainers ?? []).map((name: string) => ({ name, avatarUrl: null, isGuest: true as const }));
+      const trainers = [
+        ...registeredTrainers.map((p) => ({ ...p, isGuest: false as const })),
+        ...guestTrainers,
+      ];
+      const trainerNames = trainers.map((t) => t.name);
 
       sessions.push({
         id: session.id,
@@ -114,6 +125,7 @@ export default async function PublicPlanPage({
           ? { name: session.locations.name, mapsUrl: session.locations.maps_url ?? null }
           : null,
         trainerNames,
+        trainers,
       });
     }
   }

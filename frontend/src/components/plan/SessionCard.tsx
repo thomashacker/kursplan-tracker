@@ -88,11 +88,31 @@ export function SessionCard({ session, trainers, canEdit, isToday, onEdit, onDel
         <p className="text-xs text-muted-foreground/60 mb-1.5 italic">Kein Typ / Thema</p>
       )}
 
-      {/* Trainers */}
-      {trainerProfiles.length > 0 && (
-        <p className="text-xs text-muted-foreground mt-0.5">
-          {trainerProfiles.map((t) => t.full_name).join(", ")}
-        </p>
+      {/* Trainers + guests */}
+      {(trainerProfiles.length > 0 || (session.guest_trainers?.length ?? 0) > 0) && (
+        <div className="flex flex-wrap items-center gap-1.5 mt-1">
+          {trainerProfiles.map((t) => (
+            <span key={t.id} className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+              {t.avatar_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={t.avatar_url} alt={t.full_name} className="w-4 h-4 rounded-full object-cover shrink-0" />
+              ) : (
+                <span className="w-4 h-4 rounded-full bg-primary/20 text-primary flex items-center justify-center text-[8px] font-bold shrink-0">
+                  {t.full_name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
+                </span>
+              )}
+              {t.full_name}
+            </span>
+          ))}
+          {(session.guest_trainers ?? []).map((name) => (
+            <span key={name} className="inline-flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400">
+              <span className="w-4 h-4 rounded-full bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-[8px] font-bold shrink-0">
+                {name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
+              </span>
+              {name}
+            </span>
+          ))}
+        </div>
       )}
 
       {/* Location */}

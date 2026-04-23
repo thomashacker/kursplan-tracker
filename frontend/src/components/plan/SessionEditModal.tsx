@@ -29,6 +29,7 @@ export interface SessionSaveData {
   description: string | null;
   location_id: string | null;
   trainer_ids: string[];
+  guest_trainers: string[];
   is_cancelled: boolean;
   /** Only for new sessions: whether to generate recurring occurrences */
   is_recurring: boolean;
@@ -159,6 +160,75 @@ function MultiTagSelect({
   );
 }
 
+// ── Guest trainer free-text input ────────────────────────────
+
+function GuestTrainerInput({
+  value,
+  onChange,
+}: {
+  value: string[];
+  onChange: (v: string[]) => void;
+}) {
+  const [input, setInput] = useState("");
+
+  function add() {
+    const name = input.trim();
+    if (!name || value.includes(name)) { setInput(""); return; }
+    onChange([...value, name]);
+    setInput("");
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+        Gasttrainer
+      </Label>
+
+      {value.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-1">
+          {value.map((name) => (
+            <span
+              key={name}
+              className="inline-flex items-center gap-1 h-6 pl-2.5 pr-1.5 rounded-full text-xs font-medium bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/25"
+            >
+              {name}
+              <button
+                type="button"
+                onClick={() => onChange(value.filter((n) => n !== name))}
+                className="flex items-center justify-center w-3.5 h-3.5 rounded-full hover:bg-amber-500/20 transition-colors"
+                aria-label={`${name} entfernen`}
+              >
+                <svg width="7" height="7" viewBox="0 0 8 8" fill="none">
+                  <path d="M1 1l6 6M7 1L1 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                </svg>
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
+          placeholder="Name eingeben, Enter zum Hinzufügen…"
+          className="flex-1 h-9 px-3 rounded-xl border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+        />
+        <button
+          type="button"
+          onClick={add}
+          disabled={!input.trim()}
+          className="h-9 px-3 rounded-xl border border-border text-sm font-medium hover:bg-secondary transition-colors disabled:opacity-40"
+        >
+          +
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Scope toggle (single vs future) ──────────────────────────
 
 function ScopePicker({
@@ -259,6 +329,7 @@ export function SessionEditModal({
     ? session.session_trainers.map((st) => st.user_id)
     : session?.trainer_id ? [session.trainer_id] : [];
   const [selectedTrainerIds, setSelectedTrainerIds] = useState<string[]>(initTrainers);
+  const [guestTrainers, setGuestTrainers] = useState<string[]>(session?.guest_trainers ?? []);
   const [selectedTopics, setSelectedTopics] = useState<string[]>(session?.topics ?? []);
   const [selectedTypes, setSelectedTypes] = useState<string[]>(session?.session_types ?? []);
   const [isCancelled, setIsCancelled] = useState<boolean>(session?.is_cancelled ?? false);
@@ -290,6 +361,7 @@ export function SessionEditModal({
       description: ((form.get("description") as string) ?? "").trim() || null,
       location_id: locationId === "none" ? null : locationId,
       trainer_ids: selectedTrainerIds,
+      guest_trainers: guestTrainers,
       is_cancelled: isCancelled,
       is_recurring: isNew ? makeRecurring : false,
       edit_scope: editScope,
@@ -447,6 +519,9 @@ export function SessionEditModal({
             placeholder="Trainer hinzufügen…"
             emptyText="Keine Trainer oder Admins im Verein."
           />
+
+          {/* Guest trainers */}
+          <GuestTrainerInput value={guestTrainers} onChange={setGuestTrainers} />
 
           {/* Description */}
           <div className="space-y-1.5">

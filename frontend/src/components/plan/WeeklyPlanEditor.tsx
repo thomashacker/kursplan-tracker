@@ -305,10 +305,11 @@ function DayTimetable({
                 const height = Math.max((timeToMin(s.time_end) - timeToMin(s.time_start)) * PX_PER_MIN_DAY, 32);
                 const pct    = 100 / info.totalLanes;
 
-                const trainerNames = (s.session_trainers?.length
+                const trainerProfiles = (s.session_trainers?.length
                   ? s.session_trainers.map((st) => trainers.find((t) => t.id === st.user_id))
                   : trainers.filter((t) => t.id === s.trainer_id)
-                ).filter((t): t is Profile => Boolean(t)).map((t) => t.full_name);
+                ).filter((t): t is Profile => Boolean(t));
+                const guestTrainers = s.guest_trainers ?? [];
 
                 const types  = s.session_types ?? [];
                 const topics = s.topics ?? [];
@@ -353,8 +354,30 @@ function DayTimetable({
                       </div>
                     )}
 
-                    {height >= 80 && trainerNames.length > 0 && (
-                      <p className="text-xs text-muted-foreground">{trainerNames.join(", ")}</p>
+                    {height >= 80 && (trainerProfiles.length > 0 || guestTrainers.length > 0) && (
+                      <div className="flex flex-wrap items-center gap-1 mt-0.5">
+                        {trainerProfiles.map((t) => (
+                          <span key={t.id} className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                            {t.avatar_url ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={t.avatar_url} alt={t.full_name} className="w-3.5 h-3.5 rounded-full object-cover shrink-0" />
+                            ) : (
+                              <span className="w-3.5 h-3.5 rounded-full bg-primary/20 text-primary flex items-center justify-center text-[7px] font-bold shrink-0">
+                                {t.full_name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
+                              </span>
+                            )}
+                            {t.full_name}
+                          </span>
+                        ))}
+                        {guestTrainers.map((name) => (
+                          <span key={name} className="inline-flex items-center gap-1 text-[11px] text-amber-700 dark:text-amber-400">
+                            <span className="w-3.5 h-3.5 rounded-full bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-[7px] font-bold shrink-0">
+                              {name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
+                            </span>
+                            {name}
+                          </span>
+                        ))}
+                      </div>
                     )}
                     {height >= 80 && s.locations && (
                       <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
@@ -729,7 +752,7 @@ export function WeeklyPlanEditor({
   async function handleSaveSession(data: SessionSaveData) {
     const supabase = createClient();
     const { trainer_ids, is_recurring, edit_scope, auto_extend, ...sessionData } = data;
-    const sessionFields = { ...sessionData, trainer_id: trainer_ids[0] ?? null };
+    const sessionFields = { ...sessionData, trainer_id: trainer_ids[0] ?? null, guest_trainers: data.guest_trainers };
 
     // ── Case 1: New one-off session ───────────────────────────
     if (editingSession === "new" && !is_recurring) {
@@ -763,6 +786,7 @@ export function WeeklyPlanEditor({
           description: data.description,
           default_trainer_id: trainer_ids[0] ?? null,
           trainer_ids,
+          guest_trainers: data.guest_trainers,
           is_cancelled: data.is_cancelled,
           generated_through: generatedThrough,
           auto_extend,
@@ -809,6 +833,7 @@ export function WeeklyPlanEditor({
         description: data.description,
         default_trainer_id: trainer_ids[0] ?? null,
         trainer_ids,
+        guest_trainers: data.guest_trainers,
         is_cancelled: data.is_cancelled,
         auto_extend,
       }).eq("id", templateId);

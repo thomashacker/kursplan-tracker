@@ -5,6 +5,12 @@ import { formatTime } from "@/lib/utils/date";
 
 // ── Types ─────────────────────────────────────────────────────
 
+export type TrainerInfo = {
+  name: string;
+  avatarUrl: string | null;
+  isGuest: boolean;
+};
+
 export type PublicSession = {
   id: string;
   dateKey: string;
@@ -17,7 +23,8 @@ export type PublicSession = {
   topics: string[];
   description: string | null;
   location: { name: string; mapsUrl: string | null } | null;
-  trainerNames: string[];
+  trainerNames: string[];   // for filter logic
+  trainers: TrainerInfo[];  // for display (with avatars)
 };
 
 export type FilterOptions = {
@@ -88,7 +95,7 @@ function SessionRow({ s }: { s: PublicSession }) {
           )}
         </div>
         {!cancelled && (
-          <div className="flex flex-wrap gap-x-3 text-xs text-muted-foreground">
+          <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
             {s.location && (
               <span className="flex items-center gap-0.5">
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
@@ -99,7 +106,27 @@ function SessionRow({ s }: { s: PublicSession }) {
                   : s.location.name}
               </span>
             )}
-            {s.trainerNames.length > 0 && <span>{s.trainerNames.join(", ")}</span>}
+            {s.trainers.length > 0 && (
+              <span className="flex flex-wrap items-center gap-1.5">
+                {s.trainers.map((t) => (
+                  <span key={t.name} className={`inline-flex items-center gap-1 ${t.isGuest ? "text-amber-700 dark:text-amber-400" : ""}`}>
+                    {t.avatarUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={t.avatarUrl} alt={t.name} className="w-4 h-4 rounded-full object-cover shrink-0" />
+                    ) : (
+                      <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold shrink-0 ${
+                        t.isGuest
+                          ? "bg-amber-500/15 border border-amber-500/30 text-amber-700 dark:text-amber-400"
+                          : "bg-primary/15 text-primary"
+                      }`}>
+                        {t.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
+                      </span>
+                    )}
+                    {t.name}
+                  </span>
+                ))}
+              </span>
+            )}
           </div>
         )}
       </div>
@@ -441,10 +468,23 @@ export default function PublicPlanClient({
                         : next.location.name}
                     </span>
                   )}
-                  {next.trainerNames.length > 0 && (
-                    <span className="flex items-center gap-1">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                      {next.trainerNames.join(", ")}
+                  {next.trainers.length > 0 && (
+                    <span className="flex flex-wrap items-center gap-1.5">
+                      {next.trainers.map((t) => (
+                        <span key={t.name} className={`inline-flex items-center gap-1 ${t.isGuest ? "text-amber-700 dark:text-amber-400" : ""}`}>
+                          {t.avatarUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={t.avatarUrl} alt={t.name} className="w-4 h-4 rounded-full object-cover shrink-0" />
+                          ) : (
+                            <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold shrink-0 ${
+                              t.isGuest ? "bg-amber-500/15 border border-amber-500/30 text-amber-700 dark:text-amber-400" : "bg-primary/15 text-primary"
+                            }`}>
+                              {t.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
+                            </span>
+                          )}
+                          {t.name}
+                        </span>
+                      ))}
                     </span>
                   )}
                 </div>

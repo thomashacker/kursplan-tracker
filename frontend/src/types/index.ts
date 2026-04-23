@@ -101,6 +101,7 @@ export interface TrainingSession {
   is_cancelled: boolean;
   template_id: string | null; // set if this session was generated from a recurring template
   is_modified: boolean; // true = user edited this occurrence individually (skip bulk future edits)
+  guest_trainers: string[]; // free-text names for guest / external trainers
   tags: string[];
   notes: string | null;
   created_at: string;
@@ -125,6 +126,7 @@ export interface SessionTemplate {
   description: string | null;
   default_trainer_id: string | null;
   trainer_ids: string[];
+  guest_trainers: string[];
   tags: string[];
   is_cancelled: boolean;
 }
