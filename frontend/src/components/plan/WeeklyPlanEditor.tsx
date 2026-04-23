@@ -274,7 +274,7 @@ function DayTimetable({
         </div>
       ) : (
         <div className="rounded-xl border border-border overflow-hidden">
-          <div className="flex" style={{ height: gridH }}>
+          <div className="flex" style={{ height: Math.max(gridH, 0), minHeight: "calc(100svh - 220px)" }}>
             {/* Time labels */}
             <div className="w-14 shrink-0 relative border-r border-border">
               {hours.map((h) => (
