@@ -447,6 +447,25 @@ CREATE POLICY "profiles_select_club_members" ON public.profiles
 CREATE POLICY "profiles_update_own" ON public.profiles
   FOR UPDATE USING (id = auth.uid());
 
+-- Allow unauthenticated users to read profiles of trainers in public published sessions
+CREATE POLICY "profiles_select_public_trainers" ON public.profiles
+  FOR SELECT USING (
+    EXISTS (
+      SELECT 1 FROM public.session_trainers st
+      JOIN public.training_sessions ts ON ts.id = st.session_id
+      JOIN public.training_weeks    tw ON tw.id = ts.week_id
+      JOIN public.clubs              c  ON c.id  = tw.club_id
+      WHERE st.user_id = profiles.id AND c.is_public = true AND tw.is_published = true
+    )
+    OR
+    EXISTS (
+      SELECT 1 FROM public.training_sessions ts
+      JOIN public.training_weeks tw ON tw.id = ts.week_id
+      JOIN public.clubs           c  ON c.id  = tw.club_id
+      WHERE ts.trainer_id = profiles.id AND c.is_public = true AND tw.is_published = true
+    )
+  );
+
 -- clubs
 CREATE POLICY "clubs_select_public" ON public.clubs
   FOR SELECT USING (is_public = true);
