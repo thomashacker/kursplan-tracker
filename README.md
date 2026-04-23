@@ -1,32 +1,30 @@
-# Kursplan-Tracker
+# Kurs.Y
 
-Trainingsplan-Verwaltung für Sportvereine. Trainer und Coaches erstellen Wochenpläne, die zeigen wer wann wo und was trainiert. Mitglieder können die Pläne einsehen.
+Trainingsplan-Verwaltung für Sportvereine. Trainer und Coaches erstellen Wochenpläne, Mitglieder können die Pläne öffentlich oder mit Login einsehen.
 
 ## Stack
 
-- **Frontend**: Next.js 15 (App Router, TypeScript, Tailwind CSS, shadcn/ui)
-- **Backend**: FastAPI (Python 3.12)
+- **Frontend**: Next.js 16 (App Router, TypeScript, Tailwind CSS v4, shadcn/ui)
 - **Datenbank + Auth**: Supabase (PostgreSQL, Row Level Security)
+
+> The FastAPI backend has been removed. All server logic (account deletion, week copying) runs as Next.js API routes.
 
 ## Struktur
 
 ```
 kursplan-tracker/
-├── frontend/     # Next.js 15 App
-├── backend/      # FastAPI
-└── supabase/     # Datenbankmigrationen
+├── frontend/     # Next.js 16 App
+└── supabase/     # Datenbankmigrationen (001–013)
 ```
 
 ## Entwicklung
 
 ### Voraussetzungen
 
-- Node.js 20+
-- Python 3.12+
-- [uv](https://docs.astral.sh/uv/getting-started/installation/) (Python package manager)
+- Node.js 21.7+ (or 20.12+)
 - Supabase CLI (`npm install -g supabase`)
 
-### Frontend
+### Setup
 
 ```bash
 cd frontend
@@ -36,21 +34,31 @@ cp .env.local.example .env.local
 npm run dev
 ```
 
-### Backend
+### Umgebungsvariablen (`.env.local`)
 
-```bash
-cd backend
-uv sync --group dev
-cp .env.example .env
-# Variablen in .env eintragen
-uv run uvicorn app.main:app --reload
-```
+| Variable | Beschreibung |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase Projekt-URL |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Supabase Anon/Publishable Key |
+| `SUPABASE_SERVICE_ROLE_KEY` | Service Role Key (nur serverseitig, für Account-Löschung) |
 
 ### Datenbank
 
 ```bash
-# Migration anwenden (direkt im Supabase Dashboard SQL-Editor oder via CLI)
+# Alle Migrationen anwenden
 supabase db push
+```
+
+### Make-Befehle
+
+```bash
+make setup        # npm install + .env.local anlegen
+make dev-frontend # Entwicklungsserver starten (localhost:3000)
+make build        # Production Build
+make test         # Unit Tests (Vitest)
+make lint         # ESLint
+make check        # TypeScript type-check
+make db-push      # Migrationen anwenden
 ```
 
 ## Rollen
@@ -61,3 +69,14 @@ supabase db push
 | `trainer` | Trainingssitzungen erstellen, bearbeiten, löschen |
 | `member` | Pläne nur anzeigen (wenn Verein privat) |
 | Öffentlich | Plan anzeigen ohne Login (wenn Verein öffentlich) |
+
+## Verein erstellen
+
+Das Erstellen eines neuen Vereins ist auf ausgewählte Accounts beschränkt. Zugang wird über `app_metadata` in Supabase verwaltet:
+
+```sql
+-- Im Supabase SQL Editor ausführen
+UPDATE auth.users
+SET raw_app_meta_data = jsonb_set(raw_app_meta_data, '{can_create_club}', 'true'::jsonb)
+WHERE email = 'deine@email.com';
+```
