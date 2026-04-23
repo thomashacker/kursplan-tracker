@@ -7,14 +7,12 @@ Trainingsplan-Verwaltung für Sportvereine. Trainer und Coaches erstellen Wochen
 - **Frontend**: Next.js 16 (App Router, TypeScript, Tailwind CSS v4, shadcn/ui)
 - **Datenbank + Auth**: Supabase (PostgreSQL, Row Level Security)
 
-> The FastAPI backend has been removed. All server logic (account deletion, week copying) runs as Next.js API routes.
-
 ## Struktur
 
 ```
 kursplan-tracker/
 ├── frontend/     # Next.js 16 App
-└── supabase/     # Datenbankmigrationen (001–013)
+└── supabase/     # Datenbankmigrationen (001–015)
 ```
 
 ## Entwicklung
@@ -53,7 +51,7 @@ supabase db push
 
 ```bash
 make setup        # npm install + .env.local anlegen
-make dev-frontend # Entwicklungsserver starten (localhost:3000)
+make dev          # Entwicklungsserver starten (localhost:3000)
 make build        # Production Build
 make test         # Unit Tests (Vitest)
 make lint         # ESLint
