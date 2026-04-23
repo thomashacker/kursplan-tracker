@@ -29,6 +29,13 @@ export interface SessionSaveData {
   description: string | null;
   location_id: string | null;
   trainer_ids: string[];
+  is_cancelled: boolean;
+  /** Only for new sessions: whether to generate recurring occurrences */
+  is_recurring: boolean;
+  /** Only when editing a templated session */
+  edit_scope: "single" | "future";
+  /** Whether the cron job should keep extending this template automatically */
+  auto_extend: boolean;
 }
 
 interface Props {
@@ -152,7 +159,83 @@ function MultiTagSelect({
   );
 }
 
-// ── main component ────────────────────────────────────────────
+// ── Scope toggle (single vs future) ──────────────────────────
+
+function ScopePicker({
+  value,
+  onChange,
+}: {
+  value: "single" | "future";
+  onChange: (v: "single" | "future") => void;
+}) {
+  return (
+    <div className="rounded-xl border border-border overflow-hidden">
+      <div className="px-3 pt-2.5 pb-1.5">
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+          Änderung anwenden auf
+        </p>
+        <div className="flex gap-1 p-1 rounded-lg bg-secondary/50">
+          {(["single", "future"] as const).map((opt) => (
+            <button
+              key={opt}
+              type="button"
+              onClick={() => onChange(opt)}
+              className={`flex-1 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                value === opt
+                  ? "bg-background shadow-sm text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {opt === "single" ? "Nur diese Woche" : "Diese & alle zukünftigen"}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Toggle switch helper ──────────────────────────────────────
+
+function ToggleRow({
+  title,
+  description,
+  checked,
+  onChange,
+  destructive,
+}: {
+  title: string;
+  description: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  destructive?: boolean;
+}) {
+  return (
+    <label className="flex items-center justify-between rounded-xl border border-input px-3 py-2.5 cursor-pointer hover:bg-secondary/50 transition-colors">
+      <div>
+        <p className="text-sm font-medium">{title}</p>
+        <p className="text-xs text-muted-foreground">{description}</p>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={() => onChange(!checked)}
+        className={`relative shrink-0 h-5 w-9 rounded-full border-2 transition-colors ${
+          checked
+            ? destructive
+              ? "bg-destructive border-destructive"
+              : "bg-primary border-primary"
+            : "bg-input border-transparent"
+        }`}
+      >
+        <span className={`block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${checked ? "translate-x-4" : "translate-x-0.5"}`} />
+      </button>
+    </label>
+  );
+}
+
+// ── Main component ────────────────────────────────────────────
 
 export function SessionEditModal({
   session,
@@ -164,8 +247,10 @@ export function SessionEditModal({
   onSave,
   onClose,
 }: Props) {
-  const [saving, setSaving] = useState(false);
+  const isNew      = session === null;
+  const isRecurring = !isNew && Boolean(session?.template_id);
 
+  const [saving, setSaving] = useState(false);
   const [dayOfWeek, setDayOfWeek] = useState<number>(session?.day_of_week ?? defaultDay);
   const [locationId, setLocationId] = useState<string>(session?.location_id ?? "none");
 
@@ -175,6 +260,14 @@ export function SessionEditModal({
   const [selectedTrainerIds, setSelectedTrainerIds] = useState<string[]>(initTrainers);
   const [selectedTopics, setSelectedTopics] = useState<string[]>(session?.topics ?? []);
   const [selectedTypes, setSelectedTypes] = useState<string[]>(session?.session_types ?? []);
+  const [isCancelled, setIsCancelled] = useState<boolean>(session?.is_cancelled ?? false);
+
+  // New session only — recurring toggle
+  const [makeRecurring, setMakeRecurring] = useState(false);
+  const [autoExtend, setAutoExtend] = useState(true);
+
+  // Editing a recurring session — scope picker
+  const [editScope, setEditScope] = useState<"single" | "future">("single");
 
   function add<T extends string>(setter: React.Dispatch<React.SetStateAction<T[]>>, id: T) {
     setter((prev) => prev.includes(id) ? prev : [...prev, id]);
@@ -197,6 +290,10 @@ export function SessionEditModal({
       description: ((form.get("description") as string) ?? "").trim() || null,
       location_id: locationId === "none" ? null : locationId,
       trainer_ids: selectedTrainerIds,
+      is_cancelled: isCancelled,
+      is_recurring: isNew ? makeRecurring : false,
+      edit_scope: editScope,
+      auto_extend: autoExtend,
     });
 
     setSaving(false);
@@ -207,7 +304,20 @@ export function SessionEditModal({
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-base font-bold" style={{ fontFamily: "var(--font-syne, system-ui)" }}>
-            {session ? "Sitzung bearbeiten" : "Neue Sitzung"}
+            {isNew ? "Neue Sitzung" : "Sitzung bearbeiten"}
+            {isRecurring && (
+              <span className="ml-2 inline-flex items-center gap-1 text-xs font-normal text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-full">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                </svg>
+                Wiederkehrend
+              </span>
+            )}
+            {!isNew && !isRecurring && session?.is_modified && (
+              <span className="ml-2 inline-flex items-center text-xs font-normal text-muted-foreground bg-secondary px-2 py-0.5 rounded-full">
+                Individuell angepasst
+              </span>
+            )}
           </DialogTitle>
         </DialogHeader>
 
@@ -303,12 +413,84 @@ export function SessionEditModal({
             />
           </div>
 
+          {/* Recurring toggle — new sessions only */}
+          {isNew && (
+            <div className="space-y-2">
+              <ToggleRow
+                title="Wöchentlich wiederholen"
+                description="Erstellt diese Sitzung für die nächsten 8 Wochen."
+                checked={makeRecurring}
+                onChange={(v) => { setMakeRecurring(v); if (!v) setAutoExtend(false); }}
+              />
+              {makeRecurring && (
+                <div className="rounded-xl border border-input px-3 py-2.5 flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium">Automatisch verlängern</p>
+                    <p className="text-xs text-muted-foreground">
+                      Ein wöchentlicher Hintergrundjob verlängert automatisch um weitere 8 Wochen, bevor der Horizont endet.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={autoExtend}
+                    onClick={() => setAutoExtend((v) => !v)}
+                    className={`relative shrink-0 h-5 w-9 rounded-full border-2 transition-colors mt-0.5 ${autoExtend ? "bg-primary border-primary" : "bg-input border-transparent"}`}
+                  >
+                    <span className={`block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${autoExtend ? "translate-x-4" : "translate-x-0.5"}`} />
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Auto-extend toggle for existing recurring sessions — shown only when editing future */}
+          {isRecurring && editScope === "future" && (
+            <div className="rounded-xl border border-input px-3 py-2.5 flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium">Automatisch verlängern</p>
+                <p className="text-xs text-muted-foreground">
+                  Hintergrundjob verlängert automatisch, bevor der Horizont endet.
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={autoExtend}
+                onClick={() => setAutoExtend((v) => !v)}
+                className={`relative shrink-0 h-5 w-9 rounded-full border-2 transition-colors mt-0.5 ${autoExtend ? "bg-primary border-primary" : "bg-input border-transparent"}`}
+              >
+                <span className={`block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${autoExtend ? "translate-x-4" : "translate-x-0.5"}`} />
+              </button>
+            </div>
+          )}
+
+          {/* Cancelled toggle */}
+          <ToggleRow
+            title="Training abgesagt"
+            description="Das Training wird als abgesagt markiert und rot angezeigt."
+            checked={isCancelled}
+            onChange={setIsCancelled}
+            destructive
+          />
+
+          {/* Scope picker — only for editing a recurring session, lives near save button */}
+          {isRecurring && (
+            <ScopePicker value={editScope} onChange={setEditScope} />
+          )}
+
           <DialogFooter className="pt-2">
             <button type="button" onClick={onClose} className="h-10 px-4 rounded-xl border border-border text-sm font-medium hover:bg-secondary transition-colors">
               Abbrechen
             </button>
             <button type="submit" disabled={saving} className="h-10 px-5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold disabled:opacity-40 hover:opacity-90 transition-opacity">
-              {saving ? "Speichern…" : "Speichern"}
+              {saving
+                ? "Speichern…"
+                : isNew && makeRecurring
+                ? "Erstellen (8 Wochen)"
+                : editScope === "future" && isRecurring
+                ? "Alle zukünftigen aktualisieren"
+                : "Speichern"}
             </button>
           </DialogFooter>
         </form>

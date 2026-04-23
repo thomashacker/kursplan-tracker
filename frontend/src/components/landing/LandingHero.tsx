@@ -8,9 +8,7 @@ const springSnap = { type: "spring" as const, stiffness: 480, damping: 30 };
 
 const stagger = {
   hidden: {},
-  show: {
-    transition: { staggerChildren: 0.09, delayChildren: 0.06 },
-  },
+  show: { transition: { staggerChildren: 0.09, delayChildren: 0.06 } },
 };
 
 const slideUp = {
@@ -23,6 +21,8 @@ const fade = {
   show: { opacity: 1, transition: { duration: 0.55, ease: [0.25, 0.1, 0.25, 1] as [number, number, number, number] } },
 };
 
+// ── Main component ────────────────────────────────────────────
+
 export default function LandingHero() {
   const reduced = useReducedMotion();
 
@@ -31,7 +31,7 @@ export default function LandingHero() {
       {/* Dot-grid texture */}
       <div className="absolute inset-0 bg-dot-grid pointer-events-none" aria-hidden />
 
-      {/* Top accent glow — very subtle */}
+      {/* Top accent glow */}
       <div
         className="absolute -top-32 left-1/2 -translate-x-1/2 w-[500px] h-[500px] rounded-full pointer-events-none"
         style={{
@@ -41,7 +41,7 @@ export default function LandingHero() {
         aria-hidden
       />
 
-      {/* Wordmark header */}
+      {/* ── Wordmark header ───────────────────────────────────── */}
       <motion.header
         className="relative z-10 px-6 pt-10"
         initial={reduced ? false : { opacity: 0, y: -8 }}
@@ -66,7 +66,7 @@ export default function LandingHero() {
 
       {/* Hero content */}
       <motion.div
-        className="relative z-10 flex-1 flex flex-col justify-center px-6 pb-20 pt-12"
+        className="relative z-10 flex-1 flex flex-col justify-center px-6 pb-20 pt-12 md:items-center md:text-center"
         variants={stagger}
         initial={reduced ? false : "hidden"}
         animate="show"
@@ -96,7 +96,7 @@ export default function LandingHero() {
         {/* Subtitle */}
         <motion.p
           variants={slideUp}
-          className="text-base leading-relaxed max-w-[280px] mb-11 text-muted-foreground"
+          className="text-base leading-relaxed max-w-[280px] mb-11 text-muted-foreground md:max-w-sm"
         >
           Koordiniere dein Team, verwalte Standorte und teile Wochenpläne in Sekunden.
         </motion.p>
@@ -130,7 +130,7 @@ export default function LandingHero() {
         {/* Divider with feature labels */}
         <motion.div
           variants={fade}
-          className="mt-14 flex items-center gap-3 text-xs tracking-widest uppercase text-muted-foreground/60"
+          className="mt-14 flex items-center gap-3 text-xs tracking-widest uppercase text-muted-foreground/60 w-full max-w-sm"
         >
           <span className="flex-1 h-px bg-border" />
           <span>Trainer · Zeiten · Standorte</span>

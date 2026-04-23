@@ -8,6 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 const spring = { type: "spring" as const, stiffness: 340, damping: 30 };
 
@@ -19,7 +20,7 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   );
 }
 
-// ── Reusable chip list (topics & session types share identical UX) ──
+// ── Chip list (topics & session types) ───────────────────────
 
 function ChipListSection({
   title,
@@ -29,6 +30,7 @@ function ChipListSection({
   placeholder,
   tableName,
   clubId,
+  deleteNote,
 }: {
   title: string;
   description: string;
@@ -37,11 +39,19 @@ function ChipListSection({
   placeholder: string;
   tableName: "club_topics" | "club_session_types";
   clubId: string;
+  deleteNote: string;
 }) {
   const reduced = useReducedMotion();
   const [list, setList] = useState(items);
   const [newName, setNewName] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // Rename state
+  const [editingItem, setEditingItem] = useState<{ id: string; name: string } | null>(null);
+  const [editName, setEditName] = useState("");
+
+  // Delete confirm state
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
 
   async function add() {
     const name = newName.trim();
@@ -62,11 +72,34 @@ function ChipListSection({
     setSaving(false);
   }
 
-  async function remove(id: string) {
+  async function confirmDelete() {
+    if (!deleteTarget) return;
     const supabase = createClient();
-    const { error } = await supabase.from(tableName).delete().eq("id", id);
+    const { error } = await supabase.from(tableName).delete().eq("id", deleteTarget.id);
     if (error) { toast.error(error.message); return; }
-    setList((prev) => prev.filter((t) => t.id !== id));
+    setList((prev) => prev.filter((t) => t.id !== deleteTarget.id));
+    if (editingItem?.id === deleteTarget.id) setEditingItem(null);
+    toast.success("Gelöscht.");
+  }
+
+  function startEdit(item: { id: string; name: string }) {
+    setEditingItem(item);
+    setEditName(item.name);
+  }
+
+  async function saveRename() {
+    if (!editingItem) return;
+    const name = editName.trim();
+    if (!name || name === editingItem.name) { setEditingItem(null); return; }
+    const supabase = createClient();
+    const { error } = await supabase.from(tableName).update({ name }).eq("id", editingItem.id);
+    if (error) { toast.error(error.message); return; }
+    setList((prev) =>
+      prev.map((t) => t.id === editingItem.id ? { ...t, name } : t)
+        .sort((a, b) => a.name.localeCompare(b.name))
+    );
+    setEditingItem(null);
+    toast.success("Umbenannt. Bestehende Trainingseinheiten zeigen noch den alten Namen.");
   }
 
   return (
@@ -83,13 +116,28 @@ function ChipListSection({
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.85 }}
               transition={spring}
-              className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-full bg-secondary text-secondary-foreground"
+              className="inline-flex items-center gap-1 text-sm pl-3 pr-1.5 py-1.5 rounded-full bg-secondary text-secondary-foreground group"
             >
-              {t.name}
+              <span className="leading-none">{t.name}</span>
+
+              {/* Rename button */}
               <button
                 type="button"
-                onClick={() => remove(t.id)}
-                className="w-4 h-4 flex items-center justify-center rounded-full hover:bg-muted-foreground/20 text-muted-foreground hover:text-destructive transition-colors"
+                onClick={() => startEdit(t)}
+                className="w-5 h-5 flex items-center justify-center rounded-full hover:bg-muted-foreground/15 text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+                aria-label={`${t.name} umbenennen`}
+              >
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                </svg>
+              </button>
+
+              {/* Delete button */}
+              <button
+                type="button"
+                onClick={() => setDeleteTarget(t)}
+                className="w-5 h-5 flex items-center justify-center rounded-full hover:bg-destructive/15 text-muted-foreground/50 hover:text-destructive transition-colors"
                 aria-label={`${t.name} entfernen`}
               >
                 <svg width="8" height="8" viewBox="0 0 10 10" fill="none">
@@ -104,6 +152,52 @@ function ChipListSection({
         )}
       </div>
 
+      {/* Inline rename row */}
+      <AnimatePresence>
+        {editingItem && (
+          <motion.div
+            key="rename"
+            initial={reduced ? false : { opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.15 }}
+            className="flex gap-2 mb-3 p-3 rounded-xl border border-primary/25 bg-primary/5"
+          >
+            <div className="flex-1 space-y-1">
+              <p className="text-xs text-muted-foreground font-medium">„{editingItem.name}" umbenennen</p>
+              <Input
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") { e.preventDefault(); saveRename(); }
+                  if (e.key === "Escape") setEditingItem(null);
+                }}
+                autoFocus
+                className="h-8 rounded-lg text-sm"
+              />
+            </div>
+            <div className="flex flex-col gap-1 justify-end">
+              <button
+                type="button"
+                onClick={saveRename}
+                disabled={!editName.trim()}
+                className="h-8 px-3 rounded-lg bg-primary text-primary-foreground text-xs font-semibold disabled:opacity-40 hover:opacity-90 transition-opacity"
+              >
+                Speichern
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditingItem(null)}
+                className="h-8 px-3 rounded-lg border border-border text-xs hover:bg-secondary transition-colors"
+              >
+                Abbrechen
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Add new */}
       <div className="flex gap-2">
         <Input
           value={newName}
@@ -121,11 +215,22 @@ function ChipListSection({
           Hinzufügen
         </button>
       </div>
+
+      {/* Delete confirm dialog */}
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title={`„${deleteTarget?.name}" löschen?`}
+        description={deleteNote}
+        confirmLabel="Löschen"
+        destructive
+        onConfirm={confirmDelete}
+        onClose={() => setDeleteTarget(null)}
+      />
     </section>
   );
 }
 
-// ── Location card (edit inline) ───────────────────────────────
+// ── Location card ─────────────────────────────────────────────
 
 interface LocationCardProps {
   location: Location;
@@ -141,6 +246,7 @@ function LocationCard({ location, onUpdate, onDelete }: LocationCardProps) {
   const [address, setAddress] = useState(location.address ?? "");
   const [mapsUrl, setMapsUrl] = useState(location.maps_url ?? "");
   const [notes, setNotes] = useState(location.notes ?? "");
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   async function save() {
     setSaving(true);
@@ -159,102 +265,118 @@ function LocationCard({ location, onUpdate, onDelete }: LocationCardProps) {
   }
 
   async function del() {
-    if (!confirm(`"${location.name}" wirklich löschen?`)) return;
     const supabase = createClient();
     const { error } = await supabase.from("locations").delete().eq("id", location.id);
     if (error) { toast.error(error.message); return; }
     onDelete(location.id);
+    toast.success("Ort gelöscht.");
   }
 
   return (
-    <div className="rounded-xl border border-border bg-card overflow-hidden">
-      <div className="flex items-start justify-between gap-3 p-4">
-        <div className="flex-1 min-w-0">
-          <p className="font-semibold text-sm leading-tight">{location.name}</p>
-          {location.address && (
-            <p className="text-xs text-muted-foreground mt-0.5">{location.address}</p>
-          )}
-          {location.maps_url && (
-            <a
-              href={location.maps_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-xs text-primary hover:opacity-70 transition-opacity mt-1"
+    <>
+      <div className="rounded-xl border border-border bg-card overflow-hidden">
+        <div className="flex items-start justify-between gap-3 p-4">
+          <div className="flex-1 min-w-0">
+            <p className="font-semibold text-sm leading-tight">{location.name}</p>
+            {location.address && (
+              <p className="text-xs text-muted-foreground mt-0.5">{location.address}</p>
+            )}
+            {location.maps_url && (
+              <a
+                href={location.maps_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs text-primary hover:opacity-70 transition-opacity mt-1"
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" /><circle cx="12" cy="10" r="3" />
+                </svg>
+                Google Maps
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                  <polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
+                </svg>
+              </a>
+            )}
+            {location.notes && (
+              <p className="text-xs text-muted-foreground mt-1 italic">{location.notes}</p>
+            )}
+          </div>
+          <div className="flex gap-1 shrink-0">
+            <button
+              type="button"
+              onClick={() => setEditing((v) => !v)}
+              className={`h-7 px-2.5 rounded-lg text-xs font-medium border transition-colors ${editing ? "bg-secondary border-border" : "border-border hover:bg-secondary"}`}
             >
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" /><circle cx="12" cy="10" r="3" />
+              {editing ? "Abbrechen" : "Bearbeiten"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowDeleteConfirm(true)}
+              className="h-7 w-7 flex items-center justify-center rounded-lg border border-border hover:bg-destructive/10 hover:border-destructive/30 text-muted-foreground hover:text-destructive transition-colors"
+              title="Löschen"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                <path d="M10 11v6M14 11v6" />
+                <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
               </svg>
-              Google Maps
-              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                <polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
-              </svg>
-            </a>
+            </button>
+          </div>
+        </div>
+
+        <AnimatePresence>
+          {editing && (
+            <motion.div
+              key="edit"
+              initial={reduced ? false : { height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="overflow-hidden"
+            >
+              <div className="px-4 pb-4 space-y-3 border-t border-border pt-4">
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Name *</Label>
+                  <Input value={name} onChange={(e) => setName(e.target.value)} className="h-9 rounded-xl text-sm" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Adresse</Label>
+                  <Input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Musterstraße 1, 10115 Berlin" className="h-9 rounded-xl text-sm" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Google Maps Link</Label>
+                  <Input value={mapsUrl} onChange={(e) => setMapsUrl(e.target.value)} placeholder="https://maps.google.com/..." type="url" className="h-9 rounded-xl text-sm" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Notizen</Label>
+                  <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="rounded-xl text-sm resize-none" />
+                </div>
+                <button
+                  type="button"
+                  onClick={save}
+                  disabled={saving || !name.trim()}
+                  className="h-9 px-4 rounded-xl bg-primary text-primary-foreground text-sm font-semibold disabled:opacity-40 hover:opacity-90 transition-opacity"
+                >
+                  {saving ? "Speichern…" : "Speichern"}
+                </button>
+              </div>
+            </motion.div>
           )}
-        </div>
-        <div className="flex gap-1 shrink-0">
-          <button
-            type="button"
-            onClick={() => setEditing((v) => !v)}
-            className={`h-7 px-2.5 rounded-lg text-xs font-medium border transition-colors ${editing ? "bg-secondary border-border" : "border-border hover:bg-secondary"}`}
-          >
-            {editing ? "Abbrechen" : "Bearbeiten"}
-          </button>
-          <button
-            type="button"
-            onClick={del}
-            className="h-7 w-7 flex items-center justify-center rounded-lg border border-border hover:bg-destructive/10 hover:border-destructive/30 text-muted-foreground hover:text-destructive transition-colors"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="3 6 5 6 21 6" />
-              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-              <path d="M10 11v6M14 11v6" />
-              <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
-            </svg>
-          </button>
-        </div>
+        </AnimatePresence>
       </div>
 
-      <AnimatePresence>
-        {editing && (
-          <motion.div
-            key="edit"
-            initial={reduced ? false : { height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="overflow-hidden"
-          >
-            <div className="px-4 pb-4 space-y-3 border-t border-border pt-4">
-              <div className="space-y-1.5">
-                <Label className="text-xs text-muted-foreground">Name *</Label>
-                <Input value={name} onChange={(e) => setName(e.target.value)} className="h-9 rounded-xl text-sm" />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs text-muted-foreground">Adresse</Label>
-                <Input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Musterstraße 1, 10115 Berlin" className="h-9 rounded-xl text-sm" />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs text-muted-foreground">Google Maps Link</Label>
-                <Input value={mapsUrl} onChange={(e) => setMapsUrl(e.target.value)} placeholder="https://maps.google.com/..." type="url" className="h-9 rounded-xl text-sm" />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs text-muted-foreground">Notizen</Label>
-                <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="rounded-xl text-sm resize-none" />
-              </div>
-              <button
-                type="button"
-                onClick={save}
-                disabled={saving || !name.trim()}
-                className="h-9 px-4 rounded-xl bg-primary text-primary-foreground text-sm font-semibold disabled:opacity-40 hover:opacity-90 transition-opacity"
-              >
-                {saving ? "Speichern…" : "Speichern"}
-              </button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        title={`„${location.name}" löschen?`}
+        description="Trainingseinheiten, die diesen Ort verwenden, verlieren die Ortszuordnung. Diese Aktion kann nicht rückgängig gemacht werden."
+        confirmLabel="Löschen"
+        destructive
+        onConfirm={del}
+        onClose={() => setShowDeleteConfirm(false)}
+      />
+    </>
   );
 }
 
@@ -295,8 +417,18 @@ function LocationsSection({ clubId, initialLocations }: { clubId: string; initia
       <div className="space-y-2 mb-4">
         <AnimatePresence>
           {locations.map((loc) => (
-            <motion.div key={loc.id} initial={reduced ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={spring}>
-              <LocationCard location={loc} onUpdate={(u) => setLocations((p) => p.map((l) => l.id === u.id ? u : l))} onDelete={(id) => { setLocations((p) => p.filter((l) => l.id !== id)); toast.success("Ort gelöscht."); }} />
+            <motion.div
+              key={loc.id}
+              initial={reduced ? false : { opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={spring}
+            >
+              <LocationCard
+                location={loc}
+                onUpdate={(u) => setLocations((p) => p.map((l) => l.id === u.id ? u : l))}
+                onDelete={(id) => setLocations((p) => p.filter((l) => l.id !== id))}
+              />
             </motion.div>
           ))}
         </AnimatePresence>
@@ -307,7 +439,14 @@ function LocationsSection({ clubId, initialLocations }: { clubId: string; initia
 
       <AnimatePresence>
         {showAddForm && (
-          <motion.div key="add-form" initial={reduced ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={spring} className="rounded-xl border border-primary/25 bg-primary/5 p-4 space-y-3 mb-3">
+          <motion.div
+            key="add-form"
+            initial={reduced ? false : { opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={spring}
+            className="rounded-xl border border-primary/25 bg-primary/5 p-4 space-y-3 mb-3"
+          >
             <p className="text-sm font-medium">Neuen Ort hinzufügen</p>
             <div className="space-y-1.5"><Label className="text-xs text-muted-foreground">Name *</Label><Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Dojo Tempelhof" className="h-9 rounded-xl text-sm" /></div>
             <div className="space-y-1.5"><Label className="text-xs text-muted-foreground">Adresse</Label><Input value={newAddress} onChange={(e) => setNewAddress(e.target.value)} placeholder="Musterstraße 1, 10115 Berlin" className="h-9 rounded-xl text-sm" /></div>
@@ -356,6 +495,7 @@ export function ThemenManager({
         placeholder="Neuer Typ, z. B. Kindertraining…"
         tableName="club_session_types"
         clubId={clubId}
+        deleteNote="Dieser Typ wird aus der Auswahlliste entfernt. Bestehende Trainingseinheiten behalten den Wert."
       />
       <ChipListSection
         title="Trainingsthemen"
@@ -365,6 +505,7 @@ export function ThemenManager({
         placeholder="Neues Thema, z. B. Sparring…"
         tableName="club_topics"
         clubId={clubId}
+        deleteNote="Dieses Thema wird aus der Auswahlliste entfernt. Bestehende Trainingseinheiten behalten den Wert."
       />
       <LocationsSection clubId={clubId} initialLocations={initialLocations} />
     </div>

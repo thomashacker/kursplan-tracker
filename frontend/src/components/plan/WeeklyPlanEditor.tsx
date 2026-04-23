@@ -6,13 +6,22 @@ import { toast } from "sonner";
 import { motion, useReducedMotion } from "framer-motion";
 import type { Club, TrainingWeek, TrainingSession, Location, Profile, ClubTopic, ClubSessionType } from "@/types";
 import { DAY_NAMES } from "@/types";
-import { formatTime, formatWeekRange, offsetWeek, getCurrentMonday } from "@/lib/utils/date";
+import { formatTime, formatWeekRange, offsetWeek, getCurrentMonday, toISODate } from "@/lib/utils/date";
 import { createClient } from "@/lib/supabase/client";
-import { copyWeek } from "@/lib/api";
 import { SessionCard } from "./SessionCard";
 import { SessionEditModal, type SessionSaveData } from "./SessionEditModal";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 const spring = { type: "spring" as const, stiffness: 300, damping: 30 };
+
+const PX_PER_MIN_WEEK = 1.25; // 75px / hr  — timetable in week context
+const PX_PER_MIN_DAY  = 2;    // 120px / hr — full-day drill-down
+
+const MONTH_NAMES = [
+  "Januar","Februar","März","April","Mai","Juni",
+  "Juli","August","September","Oktober","November","Dezember",
+];
 
 interface Props {
   club: Club;
@@ -26,20 +35,368 @@ interface Props {
   sessionTypes: ClubSessionType[];
 }
 
-type View = "week" | "next";
+type View = "week" | "month";
 
-// ── helpers ───────────────────────────────────────────────────
+// ── pure helpers ──────────────────────────────────────────────
 
 function todayDayIndexInWeek(weekStart: string): number {
-  const msPerDay = 1000 * 60 * 60 * 24;
-  const weekMonday = new Date(weekStart + "T00:00:00").getTime();
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return Math.round((today.getTime() - weekMonday) / msPerDay);
+  const msPerDay = 86_400_000;
+  const mon = new Date(weekStart + "T00:00:00").getTime();
+  const now = new Date(); now.setHours(0,0,0,0);
+  return Math.round((now.getTime() - mon) / msPerDay);
 }
 
 function isCurrentWeek(weekStart: string): boolean {
   return weekStart === getCurrentMonday();
+}
+
+function timeToMin(t: string): number {
+  const [h, m] = t.split(":").map(Number);
+  return h * 60 + m;
+}
+
+function sessionLabel(s: TrainingSession): string {
+  return [...(s.session_types ?? []), ...(s.topics ?? [])].join(" · ") || "Training";
+}
+
+function getOverlapLayout(
+  daySessions: TrainingSession[]
+): Map<string, { lane: number; totalLanes: number }> {
+  const result = new Map<string, { lane: number; totalLanes: number }>();
+  const sorted = [...daySessions].sort((a, b) => a.time_start.localeCompare(b.time_start));
+  for (const s of sorted) {
+    const overlapping = sorted.filter(
+      (o) => o.time_start < s.time_end && o.time_end > s.time_start
+    );
+    result.set(s.id, {
+      lane: overlapping.findIndex((o) => o.id === s.id),
+      totalLanes: overlapping.length,
+    });
+  }
+  return result;
+}
+
+// ── Month view ────────────────────────────────────────────────
+
+function MonthView({
+  clubId,
+  initialMonthDate,
+  onDayClick,
+}: {
+  clubId: string;
+  initialMonthDate: Date;
+  onDayClick: (dayDate: Date) => void;
+}) {
+  const [year, setYear]   = useState(initialMonthDate.getFullYear());
+  const [month, setMonth] = useState(initialMonthDate.getMonth());
+  const [counts, setCounts] = useState<Map<string, number>>(new Map());
+
+  useEffect(() => {
+    async function fetch() {
+      const supabase = createClient();
+      const monthStart = new Date(year, month, 1);
+      const monthEnd   = new Date(year, month + 1, 0);
+
+      // first Monday at or before month start
+      const fd = monthStart.getDay();
+      const gridStart = new Date(monthStart);
+      gridStart.setDate(monthStart.getDate() - (fd === 0 ? 6 : fd - 1));
+
+      // last Sunday at or after month end
+      const ld = monthEnd.getDay();
+      const gridEnd = new Date(monthEnd);
+      gridEnd.setDate(monthEnd.getDate() + (ld === 0 ? 0 : 7 - ld));
+
+      const { data: weeks } = await supabase
+        .from("training_weeks")
+        .select("week_start, training_sessions(day_of_week, is_cancelled)")
+        .eq("club_id", clubId)
+        .gte("week_start", toISODate(gridStart))
+        .lte("week_start", toISODate(gridEnd));
+
+      const map = new Map<string, number>();
+      for (const w of weeks ?? []) {
+        const weekDate = new Date(w.week_start + "T00:00:00");
+        for (const s of (w.training_sessions as { day_of_week: number; is_cancelled: boolean }[]) ?? []) {
+          if (s.is_cancelled) continue;
+          const d = new Date(weekDate);
+          d.setDate(weekDate.getDate() + s.day_of_week);
+          const key = toISODate(d);
+          map.set(key, (map.get(key) ?? 0) + 1);
+        }
+      }
+      setCounts(map);
+    }
+    fetch();
+  }, [year, month, clubId]);
+
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  const monthStart = new Date(year, month, 1);
+  const monthEnd   = new Date(year, month + 1, 0);
+  const fd = monthStart.getDay();
+  const gridStart = new Date(monthStart);
+  gridStart.setDate(monthStart.getDate() - (fd === 0 ? 6 : fd - 1));
+
+  const ld = monthEnd.getDay();
+  const totalCells = (fd === 0 ? 6 : fd - 1) + monthEnd.getDate() + (ld === 0 ? 0 : 7 - ld);
+  const cells: Date[] = Array.from({ length: totalCells }, (_, i) => {
+    const d = new Date(gridStart);
+    d.setDate(gridStart.getDate() + i);
+    return d;
+  });
+
+  function prevMonth() { month === 0 ? (setYear(y => y-1), setMonth(11)) : setMonth(m => m-1); }
+  function nextMonth() { month === 11 ? (setYear(y => y+1), setMonth(0)) : setMonth(m => m+1); }
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={spring}>
+      {/* Month navigation */}
+      <div className="flex items-center gap-3 mb-5">
+        <button onClick={prevMonth} className="h-8 w-8 flex items-center justify-center rounded-lg border border-border hover:bg-secondary transition-colors">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M10 4L6 8l4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        </button>
+        <span className="font-semibold flex-1 text-center" style={{ fontFamily: "var(--font-syne, system-ui)" }}>
+          {MONTH_NAMES[month]} {year}
+        </span>
+        <button onClick={nextMonth} className="h-8 w-8 flex items-center justify-center rounded-lg border border-border hover:bg-secondary transition-colors">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        </button>
+      </div>
+
+      {/* Calendar grid */}
+      <div className="rounded-xl border border-border overflow-hidden">
+        {/* Day headers */}
+        <div className="grid grid-cols-7 border-b border-border bg-secondary/30">
+          {DAY_NAMES.map((n) => (
+            <div key={n} className="py-2 text-center text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+              {n.slice(0,2)}
+            </div>
+          ))}
+        </div>
+
+        {/* Cells */}
+        <div className="grid grid-cols-7 divide-x divide-y divide-border">
+          {cells.map((d, i) => {
+            const inMonth = d.getMonth() === month;
+            const isToday = d.getTime() === today.getTime();
+            const count = counts.get(toISODate(d)) ?? 0;
+
+            return (
+              <button
+                key={i}
+                onClick={() => onDayClick(d)}
+                className={`min-h-[72px] sm:min-h-[80px] p-2 text-left transition-colors hover:bg-secondary/50 flex flex-col gap-1 ${!inMonth ? "opacity-25" : ""}`}
+              >
+                <span className={`text-sm font-medium w-6 h-6 flex items-center justify-center rounded-full ${isToday ? "bg-primary text-primary-foreground" : "text-foreground"}`}>
+                  {d.getDate()}
+                </span>
+                {count > 0 && (
+                  <div className="flex flex-wrap gap-0.5 mt-auto">
+                    {Array.from({ length: Math.min(count, 5) }).map((_, j) => (
+                      <span key={j} className="w-1.5 h-1.5 rounded-full bg-primary/50" />
+                    ))}
+                    {count > 5 && <span className="text-[9px] text-muted-foreground leading-none">+{count-5}</span>}
+                  </div>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+// ── Day timetable (drill-down) ────────────────────────────────
+
+function DayTimetable({
+  dayIndex,
+  sessions,
+  trainers,
+  canEdit,
+  onEdit,
+  onDelete,
+  onNewSession,
+  onBack,
+}: {
+  dayIndex: number;
+  sessions: TrainingSession[];
+  trainers: Profile[];
+  canEdit: boolean;
+  onEdit: (s: TrainingSession) => void;
+  onDelete: (s: TrainingSession) => void;
+  onNewSession: (day: number) => void;
+  onBack: () => void;
+}) {
+  const daySessions = sessions
+    .filter((s) => s.day_of_week === dayIndex)
+    .sort((a, b) => a.time_start.localeCompare(b.time_start));
+
+  const layout = getOverlapLayout(daySessions);
+
+  const allMins = daySessions.flatMap((s) => [timeToMin(s.time_start), timeToMin(s.time_end)]);
+  const rangeStart = allMins.length ? Math.floor(Math.min(...allMins) / 60) * 60 : 8 * 60;
+  const rangeEnd   = allMins.length ? Math.ceil(Math.max(...allMins) / 60) * 60   : 22 * 60;
+  const gridH      = (rangeEnd - rangeStart) * PX_PER_MIN_DAY;
+
+  const hours: number[] = [];
+  for (let h = rangeStart / 60; h <= rangeEnd / 60; h++) hours.push(h);
+
+  return (
+    <motion.div initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} transition={spring}>
+      {/* Back + title */}
+      <div className="flex items-center gap-3 mb-5">
+        <button
+          onClick={onBack}
+          className="h-8 px-3 rounded-lg border border-border text-xs font-medium hover:bg-secondary transition-colors flex items-center gap-1.5"
+        >
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M10 4L6 8l4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          Zur Woche
+        </button>
+        <h2 className="font-bold text-lg" style={{ fontFamily: "var(--font-syne, system-ui)" }}>
+          {DAY_NAMES[dayIndex]}
+        </h2>
+        {canEdit && (
+          <button
+            onClick={() => onNewSession(dayIndex)}
+            className="ml-auto h-8 px-3 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:opacity-90 transition-opacity"
+          >
+            + Sitzung
+          </button>
+        )}
+      </div>
+
+      {daySessions.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-16 text-center rounded-xl border border-border">
+          <p className="text-sm font-semibold mb-1">Kein Training</p>
+          <p className="text-xs text-muted-foreground">Für diesen Tag ist noch kein Training geplant.</p>
+        </div>
+      ) : (
+        <div className="rounded-xl border border-border overflow-hidden">
+          <div className="flex" style={{ height: gridH }}>
+            {/* Time labels */}
+            <div className="w-14 shrink-0 relative border-r border-border">
+              {hours.map((h) => (
+                <div
+                  key={h}
+                  className="absolute right-2 text-[10px] text-muted-foreground font-mono leading-none"
+                  style={{ top: (h * 60 - rangeStart) * PX_PER_MIN_DAY - 6 }}
+                >
+                  {String(h).padStart(2,"0")}:00
+                </div>
+              ))}
+            </div>
+
+            {/* Session area */}
+            <div className="flex-1 relative">
+              {/* Hour lines */}
+              {hours.map((h) => (
+                <div
+                  key={h}
+                  className="absolute inset-x-0 border-t border-border/50"
+                  style={{ top: (h * 60 - rangeStart) * PX_PER_MIN_DAY }}
+                />
+              ))}
+
+              {daySessions.map((s) => {
+                const info   = layout.get(s.id)!;
+                const top    = (timeToMin(s.time_start) - rangeStart) * PX_PER_MIN_DAY;
+                const height = Math.max((timeToMin(s.time_end) - timeToMin(s.time_start)) * PX_PER_MIN_DAY, 32);
+                const pct    = 100 / info.totalLanes;
+
+                const trainerNames = (s.session_trainers?.length
+                  ? s.session_trainers.map((st) => trainers.find((t) => t.id === st.user_id))
+                  : trainers.filter((t) => t.id === s.trainer_id)
+                ).filter((t): t is Profile => Boolean(t)).map((t) => t.full_name);
+
+                const types  = s.session_types ?? [];
+                const topics = s.topics ?? [];
+
+                return (
+                  <div
+                    key={s.id}
+                    className={`absolute rounded-xl border overflow-hidden group px-3 py-2 ${
+                      s.is_cancelled
+                        ? "bg-destructive/8 border-destructive/30"
+                        : "bg-primary/10 border-primary/25"
+                    }`}
+                    style={{
+                      top,
+                      height,
+                      width:  `calc(${pct}% - 8px)`,
+                      left:   `calc(${info.lane * pct}% + 4px)`,
+                    }}
+                  >
+                    {s.is_cancelled && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-destructive mb-1">
+                        <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+                        Abgesagt
+                      </span>
+                    )}
+                    <p className="text-[11px] font-mono text-muted-foreground leading-none mb-1">
+                      {formatTime(s.time_start)} – {formatTime(s.time_end)}
+                    </p>
+
+                    {types.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mb-1">
+                        {types.map((t) => (
+                          <span key={t} className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-primary/15 text-primary border border-primary/20">{t}</span>
+                        ))}
+                      </div>
+                    )}
+                    {topics.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mb-1">
+                        {topics.map((t) => (
+                          <span key={t} className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-secondary text-secondary-foreground">{t}</span>
+                        ))}
+                      </div>
+                    )}
+
+                    {height >= 80 && trainerNames.length > 0 && (
+                      <p className="text-xs text-muted-foreground">{trainerNames.join(", ")}</p>
+                    )}
+                    {height >= 80 && s.locations && (
+                      <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                        {s.locations.name}
+                      </p>
+                    )}
+                    {height >= 100 && s.description && (
+                      <p className="text-xs text-muted-foreground mt-1 italic line-clamp-2">{s.description}</p>
+                    )}
+
+                    {canEdit && (
+                      <div className="absolute top-1.5 right-1.5 hidden group-hover:flex gap-0.5 bg-background/90 rounded-lg p-0.5 shadow-sm">
+                        <button type="button" onClick={() => onEdit(s)}
+                          className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
+                          title="Bearbeiten">
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                          </svg>
+                        </button>
+                        <button type="button" onClick={() => onDelete(s)}
+                          className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
+                          title="Löschen">
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="3 6 5 6 21 6"/>
+                            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                            <path d="M10 11v6M14 11v6"/>
+                            <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+                          </svg>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+    </motion.div>
+  );
 }
 
 // ── Next Training view ────────────────────────────────────────
@@ -54,16 +411,17 @@ function NextTrainingView({
   weekStart: string;
 }) {
   const todayIdx = todayDayIndexInWeek(weekStart);
-  const nowTime = new Date().toTimeString().slice(0, 5); // "HH:MM"
+  const nowTime  = new Date().toTimeString().slice(0, 5);
 
   const sorted = [...sessions].sort(
     (a, b) => a.day_of_week - b.day_of_week || a.time_start.localeCompare(b.time_start)
   );
 
   const next = sorted.find(
-    (s) =>
+    (s) => !s.is_cancelled && (
       s.day_of_week > todayIdx ||
       (s.day_of_week === todayIdx && s.time_start.slice(0, 5) >= nowTime)
+    )
   );
 
   if (!next) {
@@ -71,10 +429,10 @@ function NextTrainingView({
       <div className="flex flex-col items-center justify-center py-16 text-center">
         <div className="w-14 h-14 rounded-2xl bg-secondary flex items-center justify-center mb-4">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground">
-            <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-            <line x1="16" y1="2" x2="16" y2="6" />
-            <line x1="8" y1="2" x2="8" y2="6" />
-            <line x1="3" y1="10" x2="21" y2="10" />
+            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+            <line x1="16" y1="2" x2="16" y2="6"/>
+            <line x1="8" y1="2" x2="8" y2="6"/>
+            <line x1="3" y1="10" x2="21" y2="10"/>
           </svg>
         </div>
         <p className="font-semibold text-base mb-1" style={{ fontFamily: "var(--font-syne, system-ui)" }}>
@@ -85,91 +443,69 @@ function NextTrainingView({
     );
   }
 
-  const trainerProfiles: Profile[] = next.session_trainers?.length
-    ? next.session_trainers.map((st) => trainers.find((t) => t.id === st.user_id)).filter((t): t is Profile => Boolean(t))
-    : trainers.filter((t) => t.id === next.trainer_id);
+  const trainerProfiles = (next.session_trainers?.length
+    ? next.session_trainers.map((st) => trainers.find((t) => t.id === st.user_id))
+    : trainers.filter((t) => t.id === next.trainer_id)
+  ).filter((t): t is Profile => Boolean(t));
 
   const isToday = next.day_of_week === todayIdx;
 
+  const remaining = sorted.filter(
+    (s) => s.id !== next.id && !s.is_cancelled && (
+      s.day_of_week > todayIdx ||
+      (s.day_of_week === todayIdx && s.time_start.slice(0, 5) >= nowTime)
+    )
+  );
+
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={spring}
-      className="space-y-4"
-    >
+    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={spring} className="space-y-4">
       <div className="rounded-2xl border border-primary/25 bg-primary/5 p-6">
         <p className="text-xs font-semibold uppercase tracking-widest text-primary mb-3">
           {isToday ? "Heute" : DAY_NAMES[next.day_of_week]}
         </p>
-        <p
-          className="font-bold text-2xl leading-tight mb-2"
-          style={{ fontFamily: "var(--font-syne, system-ui)" }}
-        >
-          {next.session_types?.length > 0 ? next.session_types.join(" · ") : next.topics?.join(" · ") || "Training"}
+        <p className="font-bold text-2xl leading-tight mb-2" style={{ fontFamily: "var(--font-syne, system-ui)" }}>
+          {sessionLabel(next)}
         </p>
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
-          <span className="font-mono">
-            {formatTime(next.time_start)} – {formatTime(next.time_end)}
-          </span>
+          <span className="font-mono">{formatTime(next.time_start)} – {formatTime(next.time_end)}</span>
           {next.locations && (
             <span className="flex items-center gap-1">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" /><circle cx="12" cy="10" r="3" />
-              </svg>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
               {next.locations.name}
             </span>
           )}
           {trainerProfiles.length > 0 && (
             <span className="flex items-center gap-1">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" />
-              </svg>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
               {trainerProfiles.map((t) => t.full_name).join(", ")}
             </span>
           )}
         </div>
-        {next.description && (
-          <p className="text-sm text-muted-foreground mt-3 italic">{next.description}</p>
-        )}
+        {next.description && <p className="text-sm text-muted-foreground mt-3 italic">{next.description}</p>}
       </div>
 
-      {/* Remaining sessions this week */}
-      {sorted.filter(
-        (s) =>
-          s.id !== next.id &&
-          (s.day_of_week > todayIdx ||
-            (s.day_of_week === todayIdx && s.time_start.slice(0, 5) >= nowTime))
-      ).length > 0 && (
+      {remaining.length > 0 && (
         <div>
-          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-3">
-            Diese Woche noch
-          </p>
+          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-3">Diese Woche noch</p>
           <div className="space-y-2">
-            {sorted
-              .filter(
-                (s) =>
-                  s.id !== next.id &&
-                  (s.day_of_week > todayIdx ||
-                    (s.day_of_week === todayIdx && s.time_start.slice(0, 5) >= nowTime))
-              )
-              .map((s) => {
-                const sp: Profile[] = s.session_trainers?.length
-                  ? s.session_trainers.map((st) => trainers.find((t) => t.id === st.user_id)).filter((t): t is Profile => Boolean(t))
-                  : trainers.filter((t) => t.id === s.trainer_id);
-                return (
-                  <div key={s.id} className="flex items-start gap-4 p-3 rounded-xl border border-border bg-card">
-                    <div className="shrink-0 text-right">
-                      <p className="text-xs font-medium text-muted-foreground">{DAY_NAMES[s.day_of_week].slice(0, 2)}</p>
-                      <p className="text-xs font-mono text-muted-foreground">{formatTime(s.time_start)}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold">{s.session_types?.length > 0 ? s.session_types.join(" · ") : s.topics?.join(" · ") || "Training"}</p>
-                      {sp.length > 0 && <p className="text-xs text-muted-foreground">{sp.map((t) => t.full_name).join(", ")}</p>}
-                    </div>
+            {remaining.map((s) => {
+              const sp = (s.session_trainers?.length
+                ? s.session_trainers.map((st) => trainers.find((t) => t.id === st.user_id))
+                : trainers.filter((t) => t.id === s.trainer_id)
+              ).filter((t): t is Profile => Boolean(t));
+              return (
+                <div key={s.id} className="flex items-start gap-4 p-3 rounded-xl border border-border bg-card">
+                  <div className="shrink-0 text-right">
+                    <p className="text-xs font-medium text-muted-foreground">{DAY_NAMES[s.day_of_week].slice(0,2)}</p>
+                    <p className="text-xs font-mono text-muted-foreground">{formatTime(s.time_start)}</p>
                   </div>
-                );
-              })}
+                  <div>
+                    <p className="text-sm font-semibold">{sessionLabel(s)}</p>
+                    {sp.length > 0 && <p className="text-xs text-muted-foreground">{sp.map((t) => t.full_name).join(", ")}</p>}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -196,17 +532,26 @@ export function WeeklyPlanEditor({
   const [editingSession, setEditingSession] = useState<TrainingSession | null | "new">(null);
   const [newSessionDay, setNewSessionDay] = useState<number>(0);
   const [view, setView] = useState<View>("week");
+  const [selectedDay, setSelectedDay] = useState<number | null>(null); // drill-down
   const [hasChanges, setHasChanges] = useState(false);
   const [, startTransition] = useTransition();
 
-  // Sync local state when server data refreshes
+  // Delete confirm dialog state
+  const [deleteTarget, setDeleteTarget] = useState<{ sessionId: string; templateId: string | null } | null>(null);
+  const [deleteScope, setDeleteScope] = useState<"single" | "future">("single");
+  const [publishModalOpen, setPublishModalOpen] = useState(false);
+
   useEffect(() => {
     setWeek(initialWeek);
     setHasChanges(false);
   }, [initialWeek]);
 
-  const sessions = week?.training_sessions ?? [];
-  const todayIdx = todayDayIndexInWeek(weekStart);
+  // When week changes (URL nav), reset day drill-down
+  useEffect(() => { setSelectedDay(null); }, [weekStart]);
+
+
+  const sessions    = week?.training_sessions ?? [];
+  const todayIdx    = todayDayIndexInWeek(weekStart);
   const currentWeek = isCurrentWeek(weekStart);
 
   function getSessionsForDay(day: number) {
@@ -216,13 +561,10 @@ export function WeeklyPlanEditor({
   }
 
   function navigate(offset: number) {
-    const newMonday = offsetWeek(weekStart, offset);
-    router.push(`?woche=${newMonday}`);
+    router.push(`?woche=${offsetWeek(weekStart, offset)}`);
   }
 
-  function goToToday() {
-    router.push(`?`);
-  }
+  function goToToday() { router.push("?"); }
 
   async function ensureWeekExists(): Promise<string> {
     if (week?.id) return week.id;
@@ -238,41 +580,52 @@ export function WeeklyPlanEditor({
     return data.id;
   }
 
-  async function togglePublish() {
+  async function togglePublish(scope: "single" | "future" = "single") {
     if (!week) return;
     const supabase = createClient();
-    const { error } = await supabase
-      .from("training_weeks")
-      .update({ is_published: !week.is_published })
-      .eq("id", week.id);
-    if (error) {
-      toast.error(error.message);
+    const newVal = !week.is_published;
+
+    if (scope === "future") {
+      // Publish or unpublish this week + all future weeks
+      const { error } = await supabase
+        .from("training_weeks")
+        .update({ is_published: newVal })
+        .eq("club_id", club.id)
+        .gte("week_start", weekStart);
+      if (error) { toast.error(error.message); return; }
+      setWeek({ ...week, is_published: newVal });
+      toast.success(newVal ? "Diese und alle zukünftigen Wochen veröffentlicht!" : "Diese und alle zukünftigen Wochen unveröffentlicht.");
     } else {
-      setWeek({ ...week, is_published: !week.is_published });
-      toast.success(week.is_published ? "Plan unveröffentlicht." : "Plan veröffentlicht!");
+      const { error } = await supabase
+        .from("training_weeks")
+        .update({ is_published: newVal })
+        .eq("id", week.id);
+      if (error) { toast.error(error.message); return; }
+      setWeek({ ...week, is_published: newVal });
+      toast.success(newVal ? "Plan veröffentlicht!" : "Plan unveröffentlicht.");
     }
   }
 
   async function handleCopyFromLastWeek() {
     const prevMonday = offsetWeek(weekStart, -1);
-    const supabase = createClient();
+    const supabase   = createClient();
     const { data: prevWeek } = await supabase
-      .from("training_weeks")
-      .select("id")
-      .eq("club_id", club.id)
-      .eq("week_start", prevMonday)
-      .single();
-
-    if (!prevWeek) {
-      toast.error("Keine Vorwoche gefunden.");
-      return;
-    }
-
+      .from("training_weeks").select("id")
+      .eq("club_id", club.id).eq("week_start", prevMonday).single();
+    if (!prevWeek) { toast.error("Keine Vorwoche gefunden."); return; }
     try {
-      await copyWeek(prevWeek.id, weekStart);
+      const res = await fetch("/api/copy-week", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source_week_id: prevWeek.id, target_week_start: weekStart }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error ?? "Fehler beim Kopieren");
+      }
       toast.success("Vorwoche kopiert!");
       startTransition(() => router.refresh());
-    } catch (err: unknown) {
+    } catch (err) {
       toast.error(err instanceof Error ? err.message : "Fehler beim Kopieren");
     }
   }
@@ -288,157 +641,375 @@ export function WeeklyPlanEditor({
     setEditingSession("new");
   }
 
+  // Helper: replace session_trainers for a single session
+  async function saveTrainers(supabase: ReturnType<typeof createClient>, sessionId: string, trainerIds: string[]) {
+    await supabase.from("session_trainers").delete().eq("session_id", sessionId);
+    if (trainerIds.length > 0) {
+      await supabase.from("session_trainers")
+        .insert(trainerIds.map((uid) => ({ session_id: sessionId, user_id: uid })));
+    }
+  }
+
+  // Helper: batch-generate recurring sessions starting from a given week.
+  // Skips weeks that already have a session from this template (idempotent).
+  async function generateRecurringSessions(
+    supabase: ReturnType<typeof createClient>,
+    templateId: string,
+    data: {
+      day_of_week: number; time_start: string; time_end: string;
+      location_id: string | null; topics: string[]; session_types: string[];
+      description: string | null; trainer_ids: string[]; is_cancelled: boolean;
+    },
+    fromWeekStart: string,
+    numWeeks: number,
+  ) {
+    const { data: { user } } = await supabase.auth.getUser();
+    const weekStarts = Array.from({ length: numWeeks }, (_, i) => offsetWeek(fromWeekStart, i));
+
+    // Fetch or create all needed training_weeks
+    const { data: existingWeeks } = await supabase
+      .from("training_weeks")
+      .select("id, week_start")
+      .eq("club_id", club.id)
+      .in("week_start", weekStarts);
+
+    const weekMap = new Map((existingWeeks ?? []).map((w) => [w.week_start, w.id]));
+
+    const missing = weekStarts.filter((ws) => !weekMap.has(ws));
+    if (missing.length > 0) {
+      const { data: created } = await supabase
+        .from("training_weeks")
+        .insert(missing.map((ws) => ({ club_id: club.id, week_start: ws, created_by: user?.id, is_published: true })))
+        .select("id, week_start");
+      for (const w of created ?? []) weekMap.set(w.week_start, w.id);
+    }
+
+    // Skip weeks that already have a session from this template (prevents duplicates)
+    const allWeekIds = weekStarts.map((ws) => weekMap.get(ws)!).filter(Boolean);
+    const { data: alreadyExists } = await supabase
+      .from("training_sessions")
+      .select("week_id")
+      .eq("template_id", templateId)
+      .in("week_id", allWeekIds);
+    const existingWeekIds = new Set((alreadyExists ?? []).map((s) => s.week_id));
+
+    const sessionRows = weekStarts
+      .filter((ws) => !existingWeekIds.has(weekMap.get(ws)!))
+      .map((ws) => ({
+        week_id: weekMap.get(ws)!,
+        day_of_week: data.day_of_week,
+        time_start: data.time_start,
+        time_end: data.time_end,
+        location_id: data.location_id,
+        topics: data.topics,
+        session_types: data.session_types,
+        description: data.description,
+        trainer_id: data.trainer_ids[0] ?? null,
+        is_cancelled: data.is_cancelled,
+        template_id: templateId,
+        is_modified: false,
+        tags: [],
+        topic: null,
+      }));
+
+    if (sessionRows.length === 0) return;
+
+    const { data: createdSessions } = await supabase
+      .from("training_sessions")
+      .insert(sessionRows)
+      .select("id");
+
+    if (data.trainer_ids.length > 0 && createdSessions) {
+      await supabase.from("session_trainers").insert(
+        createdSessions.flatMap((s) => data.trainer_ids.map((uid) => ({ session_id: s.id, user_id: uid })))
+      );
+    }
+  }
+
   async function handleSaveSession(data: SessionSaveData) {
-    const weekId = await ensureWeekExists().catch((err) => {
-      toast.error(err.message);
-      return null;
-    });
-    if (!weekId) return;
-
     const supabase = createClient();
-    const { trainer_ids, ...sessionData } = data;
-    const sessionFields = {
-      ...sessionData,
-      trainer_id: trainer_ids[0] ?? null,
-    };
+    const { trainer_ids, is_recurring, edit_scope, auto_extend, ...sessionData } = data;
+    const sessionFields = { ...sessionData, trainer_id: trainer_ids[0] ?? null };
 
-    let sessionId: string;
-
-    if (editingSession === "new" || !editingSession) {
+    // ── Case 1: New one-off session ───────────────────────────
+    if (editingSession === "new" && !is_recurring) {
+      const weekId = await ensureWeekExists().catch((err) => { toast.error(err.message); return null; });
+      if (!weekId) return;
       const { data: created, error } = await supabase
         .from("training_sessions")
-        .insert({ ...sessionFields, week_id: weekId })
-        .select("id")
-        .single();
+        .insert({ ...sessionFields, week_id: weekId, template_id: null, is_modified: false })
+        .select("id").single();
       if (error) { toast.error(error.message); return; }
-      sessionId = created.id;
-    } else {
+      await saveTrainers(supabase, created.id, trainer_ids);
+      toast.success("Sitzung erstellt.");
+    }
+
+    // ── Case 2: New recurring session ────────────────────────
+    else if (editingSession === "new" && is_recurring) {
+      // Create the template first
+      const label = [...data.session_types, ...data.topics].join(" · ") || "Training";
+      const generatedThrough = offsetWeek(weekStart, 7); // last of 8 weeks
+      const { data: template, error: tErr } = await supabase
+        .from("session_templates")
+        .insert({
+          club_id: club.id,
+          name: label,
+          day_of_week: data.day_of_week,
+          time_start: data.time_start,
+          time_end: data.time_end,
+          location_id: data.location_id,
+          topics: data.topics,
+          session_types: data.session_types,
+          description: data.description,
+          default_trainer_id: trainer_ids[0] ?? null,
+          trainer_ids,
+          is_cancelled: data.is_cancelled,
+          generated_through: generatedThrough,
+          auto_extend,
+          tags: [],
+          topic: null,
+        })
+        .select("id").single();
+      if (tErr) { toast.error(tErr.message); return; }
+      await generateRecurringSessions(supabase, template.id, data, weekStart, 8);
+      toast.success("Wiederkehrende Sitzung erstellt (8 Wochen).");
+    }
+
+    // ── Case 3: Edit non-recurring session ───────────────────
+    else if (editingSession !== "new" && !editingSession?.template_id) {
       const { error } = await supabase
         .from("training_sessions")
-        .update(sessionFields)
-        .eq("id", editingSession.id);
+        .update(sessionFields).eq("id", editingSession!.id);
       if (error) { toast.error(error.message); return; }
-      sessionId = editingSession.id;
+      await saveTrainers(supabase, editingSession!.id, trainer_ids);
+      toast.success("Gespeichert.");
     }
 
-    // Sync session_trainers junction table
-    await supabase.from("session_trainers").delete().eq("session_id", sessionId);
-    if (trainer_ids.length > 0) {
-      await supabase
-        .from("session_trainers")
-        .insert(trainer_ids.map((uid) => ({ session_id: sessionId, user_id: uid })));
+    // ── Case 4: Edit recurring — only this week ───────────────
+    else if (editingSession !== "new" && edit_scope === "single") {
+      const { error } = await supabase
+        .from("training_sessions")
+        .update({ ...sessionFields, is_modified: true }).eq("id", editingSession!.id);
+      if (error) { toast.error(error.message); return; }
+      await saveTrainers(supabase, editingSession!.id, trainer_ids);
+      toast.success("Diese Woche aktualisiert.");
     }
 
-    toast.success("Gespeichert.");
+    // ── Case 5: Edit recurring — this and all future ──────────
+    else if (editingSession !== "new" && edit_scope === "future") {
+      const templateId = editingSession!.template_id!;
+
+      // Update the template itself; preserve generated_through (cron handles extension)
+      await supabase.from("session_templates").update({
+        time_start: data.time_start,
+        time_end: data.time_end,
+        location_id: data.location_id,
+        topics: data.topics,
+        session_types: data.session_types,
+        description: data.description,
+        default_trainer_id: trainer_ids[0] ?? null,
+        trainer_ids,
+        is_cancelled: data.is_cancelled,
+        auto_extend,
+      }).eq("id", templateId);
+
+      // Find future week IDs (current week onwards)
+      const { data: futureWeeks } = await supabase
+        .from("training_weeks")
+        .select("id")
+        .eq("club_id", club.id)
+        .gte("week_start", weekStart);
+      const futureWeekIds = (futureWeeks ?? []).map((w) => w.id);
+
+      if (futureWeekIds.length > 0) {
+        // Get future unmodified session IDs for bulk trainer update
+        const { data: futureSessions } = await supabase
+          .from("training_sessions")
+          .select("id")
+          .eq("template_id", templateId)
+          .eq("is_modified", false)
+          .in("week_id", futureWeekIds);
+
+        const futureIds = (futureSessions ?? []).map((s) => s.id);
+
+        // Bulk update sessions
+        await supabase.from("training_sessions")
+          .update(sessionFields)
+          .eq("template_id", templateId)
+          .eq("is_modified", false)
+          .in("week_id", futureWeekIds);
+
+        // Replace session_trainers for all affected sessions
+        if (futureIds.length > 0) {
+          await supabase.from("session_trainers").delete().in("session_id", futureIds);
+          if (trainer_ids.length > 0) {
+            await supabase.from("session_trainers").insert(
+              futureIds.flatMap((sid) => trainer_ids.map((uid) => ({ session_id: sid, user_id: uid })))
+            );
+          }
+        }
+      }
+
+      toast.success("Alle zukünftigen Sitzungen aktualisiert.");
+    }
+
     setEditingSession(null);
     setHasChanges(true);
     startTransition(() => router.refresh());
   }
 
-  async function handleDeleteSession(sessionId: string) {
-    if (!confirm("Sitzung wirklich löschen?")) return;
+  function requestDelete(session: TrainingSession) {
+    setDeleteScope("single");
+    setDeleteTarget({ sessionId: session.id, templateId: session.template_id ?? null });
+  }
+
+  async function executeDelete() {
+    if (!deleteTarget) return;
+    const { sessionId, templateId } = deleteTarget;
     const supabase = createClient();
-    const { error } = await supabase.from("training_sessions").delete().eq("id", sessionId);
-    if (error) { toast.error(error.message); return; }
+
+    if (deleteScope === "future" && templateId) {
+      // Delete all future unmodified sessions with this template
+      const { data: futureWeeks } = await supabase
+        .from("training_weeks")
+        .select("id")
+        .eq("club_id", club.id)
+        .gte("week_start", weekStart);
+      const futureWeekIds = (futureWeeks ?? []).map((w) => w.id);
+
+      if (futureWeekIds.length > 0) {
+        await supabase.from("training_sessions")
+          .delete()
+          .eq("template_id", templateId)
+          .in("week_id", futureWeekIds);
+      }
+      // Delete the template itself (ON DELETE SET NULL keeps past sessions intact)
+      await supabase.from("session_templates").delete().eq("id", templateId);
+
+      toast.success("Alle zukünftigen Sitzungen gelöscht.");
+    } else {
+      const { error } = await supabase.from("training_sessions").delete().eq("id", sessionId);
+      if (error) { toast.error(error.message); return; }
+      toast.success("Sitzung gelöscht.");
+    }
+
     setWeek((w) =>
       w ? { ...w, training_sessions: (w.training_sessions ?? []).filter((s) => s.id !== sessionId) } : w
     );
     setHasChanges(true);
-    toast.success("Sitzung gelöscht.");
+    setDeleteTarget(null);
+  }
+
+  // Month view: clicking a day navigates to that week and opens day drill-down
+  function handleMonthDayClick(d: Date) {
+    const dow = d.getDay();
+    const daysBack = dow === 0 ? 6 : dow - 1;
+    const monday = new Date(d);
+    monday.setDate(d.getDate() - daysBack);
+    const mondayIso = toISODate(monday);
+    const dayIndex  = dow === 0 ? 6 : dow - 1; // 0=Mon ... 6=Sun
+
+    setView("week");
+    setSelectedDay(dayIndex);
+    if (mondayIso !== weekStart) {
+      router.push(`?woche=${mondayIso}`);
+    }
   }
 
   return (
     <div>
       {/* ── Navigation header ─────────────────────────────── */}
       <div className="flex flex-col gap-3 mb-6">
-        {/* Week nav row */}
         <div className="flex items-center gap-2 flex-wrap">
-          <button
-            onClick={() => navigate(-1)}
-            className="h-9 px-3 rounded-xl border border-border text-sm font-medium hover:bg-secondary transition-colors flex items-center gap-1"
-          >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-              <path d="M10 4L6 8l4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
+          <button onClick={() => navigate(-1)} className="h-9 px-3 rounded-xl border border-border text-sm font-medium hover:bg-secondary transition-colors flex items-center gap-1">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 4L6 8l4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
             <span className="hidden sm:inline">Vorwoche</span>
           </button>
 
-          <div className="flex items-center gap-2 flex-1 justify-center">
-            <div className="text-center">
-              <p className="font-semibold text-sm sm:text-base leading-tight">
-                {formatWeekRange(weekStart)}
-              </p>
-              {currentWeek && (
-                <p className="text-xs text-primary font-medium">Aktuelle Woche</p>
-              )}
-            </div>
+          <div className="flex-1 text-center">
+            <p className="font-semibold text-sm sm:text-base leading-tight">{formatWeekRange(weekStart)}</p>
+            {currentWeek && <p className="text-xs text-primary font-medium">Aktuelle Woche</p>}
           </div>
 
           {!currentWeek && (
-            <button
-              onClick={goToToday}
-              className="h-9 px-3 rounded-xl border border-primary/30 bg-primary/5 text-primary text-sm font-medium hover:bg-primary/10 transition-colors"
-            >
+            <button onClick={goToToday} className="h-9 px-3 rounded-xl border border-primary/30 bg-primary/5 text-primary text-sm font-medium hover:bg-primary/10 transition-colors">
               Heute
             </button>
           )}
 
-          <button
-            onClick={() => navigate(1)}
-            className="h-9 px-3 rounded-xl border border-border text-sm font-medium hover:bg-secondary transition-colors flex items-center gap-1"
-          >
+          <button onClick={() => navigate(1)} className="h-9 px-3 rounded-xl border border-border text-sm font-medium hover:bg-secondary transition-colors flex items-center gap-1">
             <span className="hidden sm:inline">Nächste Woche</span>
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-              <path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
           </button>
         </div>
 
-        {/* Actions row */}
         {canEdit && (
-          <div className="flex gap-2 flex-wrap">
-            <button
-              onClick={handleCopyFromLastWeek}
-              className="h-8 px-3 rounded-lg border border-border text-xs font-medium hover:bg-secondary transition-colors"
-            >
+          <div className="flex gap-2 flex-wrap items-center">
+            {/* "Vorwoche kopieren" hidden — re-enable by uncommenting if needed.
+                Handler: handleCopyFromLastWeek(), API route: /api/copy-week
+            <button onClick={handleCopyFromLastWeek} className="h-8 px-3 rounded-lg border border-border text-xs font-medium hover:bg-secondary transition-colors">
               Vorwoche kopieren
             </button>
-            {week && (
+            */}
+            {week && isAdmin && (
               <>
-                {isAdmin && (
-                  <button
-                    onClick={togglePublish}
-                    className={`h-8 px-3 rounded-lg text-xs font-medium transition-colors ${
-                      week.is_published
-                        ? "border border-border hover:bg-secondary"
-                        : "bg-primary text-primary-foreground hover:opacity-90"
-                    }`}
-                  >
-                    {week.is_published ? "Unveröffentlichen" : "Veröffentlichen"}
-                  </button>
-                )}
-                {hasChanges && (
-                  <button
-                    onClick={handleDiscardChanges}
-                    className="h-8 px-3 rounded-lg border border-border text-xs font-medium text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
-                  >
-                    Änderungen verwerfen
-                  </button>
-                )}
+                <button
+                  onClick={() => setPublishModalOpen(true)}
+                  className={`h-8 px-3 rounded-lg text-xs font-medium transition-colors ${
+                    week.is_published
+                      ? "border border-border hover:bg-secondary"
+                      : "bg-primary text-primary-foreground hover:opacity-90 font-semibold"
+                  }`}
+                >
+                  {week.is_published ? "Unveröffentlichen" : "Veröffentlichen"}
+                </button>
+
+                <Dialog open={publishModalOpen} onOpenChange={setPublishModalOpen}>
+                  <DialogContent className="max-w-sm">
+                    <DialogHeader>
+                      <DialogTitle className="text-base font-bold" style={{ fontFamily: "var(--font-syne, system-ui)" }}>
+                        {week.is_published ? "Unveröffentlichen" : "Veröffentlichen"}
+                      </DialogTitle>
+                    </DialogHeader>
+                    <p className="text-sm text-muted-foreground -mt-1">
+                      {week.is_published
+                        ? "Welche Wochen sollen versteckt werden?"
+                        : "Welche Wochen sollen veröffentlicht werden?"}
+                    </p>
+                    <div className="flex flex-col gap-2 pt-1">
+                      <button
+                        onClick={() => { setPublishModalOpen(false); togglePublish("single"); }}
+                        className="w-full text-left px-4 py-3 rounded-xl border border-border hover:bg-secondary transition-colors"
+                      >
+                        <p className="text-sm font-semibold">Nur diese Woche</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">{formatWeekRange(weekStart)}</p>
+                      </button>
+                      <button
+                        onClick={() => { setPublishModalOpen(false); togglePublish("future"); }}
+                        className="w-full text-left px-4 py-3 rounded-xl border border-border hover:bg-secondary transition-colors"
+                      >
+                        <p className="text-sm font-semibold">Diese & alle zukünftigen Wochen</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">Ab {formatWeekRange(weekStart)}</p>
+                      </button>
+                    </div>
+                    <button
+                      onClick={() => setPublishModalOpen(false)}
+                      className="w-full h-9 rounded-xl border border-border text-sm text-muted-foreground hover:bg-secondary transition-colors mt-1"
+                    >
+                      Abbrechen
+                    </button>
+                  </DialogContent>
+                </Dialog>
               </>
             )}
-            {/* Publish badge */}
+            {hasChanges && (
+              <button onClick={handleDiscardChanges} className="h-8 px-3 rounded-lg border border-border text-xs font-medium text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors">
+                Änderungen verwerfen
+              </button>
+            )}
             {week && (
-              <span
-                className={`inline-flex items-center gap-1 self-center text-xs font-medium ${
-                  week.is_published ? "text-green-600" : "text-muted-foreground"
-                }`}
-              >
-                <span
-                  className={`w-1.5 h-1.5 rounded-full ${
-                    week.is_published ? "bg-green-500" : "bg-muted-foreground/40"
-                  }`}
-                />
+              <span className={`inline-flex items-center gap-1 text-xs font-medium ${week.is_published ? "text-green-600" : "text-muted-foreground"}`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${week.is_published ? "bg-green-500" : "bg-muted-foreground/40"}`} />
                 {week.is_published ? "Veröffentlicht" : "Entwurf"}
               </span>
             )}
@@ -448,139 +1019,122 @@ export function WeeklyPlanEditor({
 
       {/* ── View tabs ──────────────────────────────────────── */}
       <div className="flex gap-1 mb-5 border-b border-border">
-        {(["week", "next"] as View[]).map((v) => (
+        {(["week", "month"] as View[]).map((v) => (
           <button
             key={v}
-            onClick={() => setView(v)}
+            onClick={() => { setView(v); if (v !== "week") setSelectedDay(null); }}
             className={`pb-2.5 px-1 mr-4 text-sm font-medium border-b-2 transition-colors -mb-px ${
-              view === v
-                ? "border-primary text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground"
+              view === v ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
             }`}
           >
-            {v === "week" ? "Wochenplan" : "Nächstes Training"}
+            {v === "week" ? "Wochenplan" : "Monatsansicht"}
           </button>
         ))}
       </div>
 
-      {/* ── Next Training view ─────────────────────────────── */}
-      {view === "next" && (
-        <NextTrainingView sessions={sessions} trainers={trainers} weekStart={weekStart} />
+      {/* ── Month view ─────────────────────────────────────── */}
+      {view === "month" && (
+        <MonthView
+          clubId={club.id}
+          initialMonthDate={new Date(weekStart + "T00:00:00")}
+          onDayClick={handleMonthDayClick}
+        />
       )}
+
 
       {/* ── Week view ──────────────────────────────────────── */}
       {view === "week" && (
         <>
-          {/* Mobile: vertical list */}
-          <div className="flex flex-col gap-4 md:hidden">
-            {DAY_NAMES.map((dayName, dayIndex) => {
-              const daySessions = getSessionsForDay(dayIndex);
-              const isToday = dayIndex === todayIdx && currentWeek;
-              if (!canEdit && daySessions.length === 0) return null;
-              return (
-                <motion.div
-                  key={dayIndex}
-                  initial={reduced ? false : { opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ ...spring, delay: dayIndex * 0.03 }}
-                >
-                  <div
-                    className={`rounded-xl border overflow-hidden ${
-                      isToday ? "border-primary/30" : "border-border"
-                    }`}
-                  >
-                    <div
-                      className={`flex items-center justify-between px-3 py-2 ${
-                        isToday ? "bg-primary/8" : "bg-secondary/40"
-                      }`}
-                    >
-                      <span className={`text-xs font-semibold uppercase tracking-widest ${isToday ? "text-primary" : "text-muted-foreground"}`}>
-                        {dayName}
-                        {isToday && <span className="ml-2 text-[10px] font-medium tracking-normal normal-case">Heute</span>}
-                      </span>
-                      {canEdit && (
-                        <button
-                          onClick={() => openNewSession(dayIndex)}
-                          className="text-xs text-muted-foreground hover:text-primary transition-colors font-medium"
-                        >
-                          + Hinzufügen
-                        </button>
-                      )}
-                    </div>
-                    <div className="p-2 space-y-2">
-                      {daySessions.length === 0 ? (
-                        <p className="text-xs text-muted-foreground/50 py-1 px-1">Kein Training</p>
-                      ) : (
-                        daySessions.map((session) => (
-                          <SessionCard
-                            key={session.id}
-                            session={session}
-                            trainers={trainers}
-                            canEdit={canEdit}
-                            isToday={isToday}
-                            onEdit={() => setEditingSession(session)}
-                            onDelete={() => handleDeleteSession(session.id)}
-                          />
-                        ))
-                      )}
-                    </div>
-                  </div>
-                </motion.div>
-              );
-            })}
-          </div>
+          {/* Day timetable drill-down */}
+          {selectedDay !== null ? (
+            <DayTimetable
+              dayIndex={selectedDay}
+              sessions={sessions}
+              trainers={trainers}
+              canEdit={canEdit}
+              onEdit={(s) => setEditingSession(s)}
+              onDelete={requestDelete}
+              onNewSession={openNewSession}
+              onBack={() => setSelectedDay(null)}
+            />
+          ) : (
+            <>
+              {/* Mobile: vertical list */}
+              <div className="flex flex-col gap-4 md:hidden">
+                {DAY_NAMES.map((dayName, dayIndex) => {
+                  const daySessions = getSessionsForDay(dayIndex);
+                  const isToday     = dayIndex === todayIdx && currentWeek;
+                  if (!canEdit && daySessions.length === 0) return null;
+                  return (
+                    <motion.div key={dayIndex} initial={reduced ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ ...spring, delay: dayIndex * 0.03 }}>
+                      <div className={`rounded-xl border overflow-hidden ${isToday ? "border-primary/30" : "border-border"}`}>
+                        <div className={`flex items-center justify-between px-3 py-2 ${isToday ? "bg-primary/8" : "bg-secondary/40"}`}>
+                          <button
+                            onClick={() => setSelectedDay(dayIndex)}
+                            className={`text-xs font-semibold uppercase tracking-widest hover:text-primary transition-colors ${isToday ? "text-primary" : "text-muted-foreground"}`}
+                          >
+                            {dayName}{isToday && <span className="ml-2 text-[10px] font-medium tracking-normal normal-case">Heute</span>}
+                          </button>
+                          {canEdit && (
+                            <button onClick={() => openNewSession(dayIndex)} className="text-xs text-muted-foreground hover:text-primary transition-colors font-medium">
+                              + Hinzufügen
+                            </button>
+                          )}
+                        </div>
+                        <div className="p-2 space-y-2">
+                          {daySessions.length === 0 ? (
+                            <p className="text-xs text-muted-foreground/50 py-1 px-1">Kein Training</p>
+                          ) : (
+                            daySessions.map((session) => (
+                              <SessionCard key={session.id} session={session} trainers={trainers} canEdit={canEdit} isToday={isToday} onEdit={() => setEditingSession(session)} onDelete={() => requestDelete(session)} />
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </div>
 
-          {/* Desktop: 7-column grid */}
-          <div className="hidden md:grid grid-cols-7 gap-2">
-            {DAY_NAMES.map((dayName, dayIndex) => {
-              const daySessions = getSessionsForDay(dayIndex);
-              const isToday = dayIndex === todayIdx && currentWeek;
-              return (
-                <div key={dayIndex} className="min-h-[180px] flex flex-col">
-                  {/* Day header */}
-                  <div
-                    className={`text-xs font-semibold text-center py-2 mb-2 rounded-lg uppercase tracking-widest ${
-                      isToday
-                        ? "bg-primary/10 text-primary"
-                        : "text-muted-foreground"
-                    }`}
-                  >
-                    {dayName.slice(0, 2)}
-                    {isToday && <span className="block text-[9px] font-medium tracking-normal normal-case -mt-0.5">Heute</span>}
-                  </div>
-                  {/* Sessions */}
-                  <div className="flex-1 space-y-2">
-                    {daySessions.map((session) => (
-                      <SessionCard
-                        key={session.id}
-                        session={session}
-                        trainers={trainers}
-                        canEdit={canEdit}
-                        isToday={isToday}
-                        onEdit={() => setEditingSession(session)}
-                        onDelete={() => handleDeleteSession(session.id)}
-                      />
-                    ))}
-                    {canEdit && (
+              {/* Desktop: 7-column grid */}
+              <div className="hidden md:grid grid-cols-7 gap-2">
+                {DAY_NAMES.map((dayName, dayIndex) => {
+                  const daySessions = getSessionsForDay(dayIndex);
+                  const isToday     = dayIndex === todayIdx && currentWeek;
+                  return (
+                    <div key={dayIndex} className="min-h-[180px] flex flex-col">
+                      {/* Clickable day header → drill-down */}
                       <button
-                        onClick={() => openNewSession(dayIndex)}
-                        className="w-full text-xs text-muted-foreground/50 border border-dashed border-border rounded-xl py-2 hover:border-primary/40 hover:text-primary transition-colors"
+                        onClick={() => setSelectedDay(dayIndex)}
+                        className={`text-xs font-semibold text-center py-2 mb-2 rounded-lg uppercase tracking-widest w-full transition-colors hover:bg-primary/10 hover:text-primary ${
+                          isToday ? "bg-primary/10 text-primary" : "text-muted-foreground"
+                        }`}
                       >
-                        +
+                        {dayName.slice(0,2)}
+                        {isToday && <span className="block text-[9px] font-medium tracking-normal normal-case -mt-0.5">Heute</span>}
                       </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                      <div className="flex-1 space-y-2">
+                        {daySessions.map((session) => (
+                          <SessionCard key={session.id} session={session} trainers={trainers} canEdit={canEdit} isToday={isToday} onEdit={() => setEditingSession(session)} onDelete={() => requestDelete(session)} />
+                        ))}
+                        {canEdit && (
+                          <button onClick={() => openNewSession(dayIndex)} className="w-full text-xs text-muted-foreground/50 border border-dashed border-border rounded-xl py-2 hover:border-primary/40 hover:text-primary transition-colors">
+                            +
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
 
-          {/* Empty state */}
-          {sessions.length === 0 && !canEdit && (
-            <div className="flex flex-col items-center justify-center py-20 text-center">
-              <p className="font-semibold text-base mb-1">Keine Trainingseinheiten</p>
-              <p className="text-sm text-muted-foreground">Diese Woche ist noch kein Training geplant.</p>
-            </div>
+              {sessions.length === 0 && !canEdit && (
+                <div className="flex flex-col items-center justify-center py-20 text-center">
+                  <p className="font-semibold text-base mb-1">Keine Trainingseinheiten</p>
+                  <p className="text-sm text-muted-foreground">Diese Woche ist noch kein Training geplant.</p>
+                </div>
+              )}
+            </>
           )}
         </>
       )}
@@ -598,6 +1152,44 @@ export function WeeklyPlanEditor({
           onClose={() => setEditingSession(null)}
         />
       )}
+
+      {/* ── Delete confirm dialog ──────────────────────────── */}
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="Sitzung löschen?"
+        confirmLabel="Löschen"
+        destructive
+        onConfirm={executeDelete}
+        onClose={() => setDeleteTarget(null)}
+      >
+        {deleteTarget?.templateId ? (
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Diese Sitzung ist Teil einer wöchentlichen Wiederholung. Was soll gelöscht werden?
+            </p>
+            <div className="flex gap-1 p-1 rounded-lg bg-secondary/50">
+              {(["single", "future"] as const).map((opt) => (
+                <button
+                  key={opt}
+                  type="button"
+                  onClick={() => setDeleteScope(opt)}
+                  className={`flex-1 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                    deleteScope === opt
+                      ? "bg-background shadow-sm text-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {opt === "single" ? "Nur diese Woche" : "Diese & alle zukünftigen"}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Diese Trainingseinheit wird endgültig gelöscht.
+          </p>
+        )}
+      </ConfirmDialog>
     </div>
   );
 }

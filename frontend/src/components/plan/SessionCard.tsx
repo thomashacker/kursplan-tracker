@@ -11,6 +11,7 @@ interface Props {
 }
 
 export function SessionCard({ session, trainers, canEdit, isToday, onEdit, onDelete }: Props) {
+  const cancelled = session.is_cancelled;
   const trainerProfiles: Profile[] = session.session_trainers?.length
     ? session.session_trainers.map((st) => trainers.find((t) => t.id === st.user_id)).filter((t): t is Profile => Boolean(t))
     : trainers.filter((t) => t.id === session.trainer_id);
@@ -20,12 +21,43 @@ export function SessionCard({ session, trainers, canEdit, isToday, onEdit, onDel
 
   return (
     <div
-      className={`relative rounded-xl border p-3 bg-card text-sm group transition-shadow hover:shadow-sm ${
-        isToday ? "border-primary/40 bg-primary/5" : "border-border"
+      className={`relative rounded-xl border p-3 text-sm group transition-shadow hover:shadow-sm ${
+        cancelled
+          ? "border-destructive/30 bg-destructive/5 opacity-75"
+          : isToday
+          ? "border-primary/40 bg-primary/5 bg-card"
+          : "border-border bg-card"
       }`}
     >
+      {/* Recurring badge */}
+      {session.template_id && !session.is_modified && !cancelled && (
+        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-primary/70 mb-1">
+          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+          </svg>
+          Wöchentlich
+        </span>
+      )}
+      {session.template_id && session.is_modified && !cancelled && (
+        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-muted-foreground/60 mb-1">
+          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+          </svg>
+          Individuell angepasst
+        </span>
+      )}
+
+      {/* Cancelled badge */}
+      {cancelled && (
+        <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-destructive mb-1.5">
+          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+          Abgesagt
+        </span>
+      )}
+
       {/* Time */}
-      <div className="text-xs text-muted-foreground mb-1.5 font-mono">
+      <div className={`text-xs mb-1.5 font-mono ${cancelled ? "text-muted-foreground/60 line-through" : "text-muted-foreground"}`}>
         {formatTime(session.time_start)} – {formatTime(session.time_end)}
       </div>
 
@@ -78,21 +110,21 @@ export function SessionCard({ session, trainers, canEdit, isToday, onEdit, onDel
         <p className="text-xs text-muted-foreground mt-1 line-clamp-2 italic">{session.description}</p>
       )}
 
-      {/* Edit / Delete */}
+      {/* Edit / Delete — always visible on mobile, hover-revealed on desktop */}
       {canEdit && (
-        <div className="absolute top-2 right-2 hidden group-hover:flex gap-1">
+        <div className="absolute top-2 right-2 flex gap-1 md:hidden md:group-hover:flex">
           <button type="button" onClick={onEdit}
-            className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
+            className="w-7 h-7 md:w-6 md:h-6 flex items-center justify-center rounded-md bg-secondary/80 md:bg-transparent hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
             title="Bearbeiten">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
               <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
             </svg>
           </button>
           <button type="button" onClick={onDelete}
-            className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
+            className="w-7 h-7 md:w-6 md:h-6 flex items-center justify-center rounded-md bg-secondary/80 md:bg-transparent hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
             title="Löschen">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="3 6 5 6 21 6" />
               <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
               <path d="M10 11v6M14 11v6" />

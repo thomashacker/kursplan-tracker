@@ -51,7 +51,7 @@ export function formatWeekRange(mondayIso: string): string {
   return `${fmt(monday)} – ${fmt(sunday)}${sunday.getFullYear()}`;
 }
 
-function toISODate(d: Date): string {
+export function toISODate(d: Date): string {
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");

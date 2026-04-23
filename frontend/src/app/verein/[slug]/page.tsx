@@ -1,167 +1,149 @@
 import { createClient } from "@/lib/supabase/server";
 import { notFound } from "next/navigation";
-import type { TrainingWeek, Club } from "@/types";
+import type { TrainingSession, TrainingWeek, Club, Location } from "@/types";
 import { DAY_NAMES } from "@/types";
-import { getCurrentMonday, formatWeekRange, formatTime } from "@/lib/utils/date";
-import { WeekNav } from "@/components/plan/WeekNav";
+import { getCurrentMonday, offsetWeek, toISODate, getSessionDate } from "@/lib/utils/date";
+import PublicPlanClient from "./PublicPlanClient";
+import type { PublicSession } from "./PublicPlanClient";
+
+// ── Date label helpers ────────────────────────────────────────
+
+function timeToMin(t: string) {
+  const [h, m] = t.split(":").map(Number);
+  return h * 60 + m;
+}
+
+function fullLabel(d: Date): string {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
+  if (d.getTime() === today.getTime()) return "Heute";
+  if (d.getTime() === tomorrow.getTime()) return "Morgen";
+  return `${DAY_NAMES[d.getDay() === 0 ? 6 : d.getDay() - 1]}, ${d.getDate()}. ${
+    ["Jan","Feb","Mär","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"][d.getMonth()]
+  }`;
+}
+
+function shortLabel(d: Date): string {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
+  if (d.getTime() === today.getTime()) return "Heute";
+  if (d.getTime() === tomorrow.getTime()) return "Morgen";
+  const dayShort = ["Mo","Di","Mi","Do","Fr","Sa","So"][d.getDay() === 0 ? 6 : d.getDay() - 1];
+  return `${dayShort} ${d.getDate()}.${String(d.getMonth() + 1).padStart(2, "0")}.`;
+}
+
+// ── Page ──────────────────────────────────────────────────────
 
 export default async function PublicPlanPage({
   params,
-  searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ woche?: string }>;
 }) {
   const { slug } = await params;
-  const { woche } = await searchParams;
-  const weekStart = woche ?? getCurrentMonday();
-
   const supabase = await createClient();
 
   const { data: club } = await supabase
-    .from("clubs")
-    .select("*")
-    .eq("slug", slug)
-    .single<Club>();
-
+    .from("clubs").select("*").eq("slug", slug).single<Club>();
   if (!club) notFound();
 
   if (!club.is_public) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) notFound();
     const { data: membership } = await supabase
-      .from("club_memberships")
-      .select("id")
-      .eq("club_id", club.id)
-      .eq("user_id", user.id)
-      .eq("status", "active")
-      .single();
+      .from("club_memberships").select("id")
+      .eq("club_id", club.id).eq("user_id", user.id).eq("status", "active").single();
     if (!membership) notFound();
   }
 
-  const { data: week } = await supabase
+  const monday = getCurrentMonday();
+  const until  = offsetWeek(monday, 9);
+
+  const { data: weeks } = await supabase
     .from("training_weeks")
     .select("*, training_sessions(*, locations(*), session_trainers(user_id))")
     .eq("club_id", club.id)
-    .eq("week_start", weekStart)
     .eq("is_published", true)
-    .single<TrainingWeek>();
+    .gte("week_start", monday)
+    .lte("week_start", until)
+    .order("week_start", { ascending: true })
+    .returns<TrainingWeek[]>();
 
-  // Resolve trainer profiles separately to avoid transitive FK join issue
-  const allTrainerIds = [
-    ...new Set(
-      (week?.training_sessions ?? []).flatMap(
-        (s) => s.session_trainers?.map((st) => st.user_id) ?? (s.trainer_id ? [s.trainer_id] : [])
-      )
-    ),
-  ];
+  // Resolve trainer names
+  const allSessions = (weeks ?? []).flatMap((w) => w.training_sessions ?? []);
+  const allTrainerIds = [...new Set(
+    allSessions.flatMap((s) =>
+      s.session_trainers?.map((st: { user_id: string }) => st.user_id) ?? (s.trainer_id ? [s.trainer_id] : [])
+    )
+  )];
   const { data: trainerProfiles } = allTrainerIds.length
     ? await supabase.from("profiles").select("id, full_name").in("id", allTrainerIds)
     : { data: [] };
-  const profileMap = Object.fromEntries((trainerProfiles ?? []).map((p) => [p.id, p.full_name]));
+  const profileMap = Object.fromEntries((trainerProfiles ?? []).map((p) => [p.id, p.full_name as string]));
+
+  // Build serializable flat list
+  const now = new Date();
+  const todayStr = toISODate(now);
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+
+  const sessions: PublicSession[] = [];
+
+  for (const week of weeks ?? []) {
+    for (const session of (week.training_sessions ?? []) as (TrainingSession & { locations?: Location })[]) {
+      const date = getSessionDate(week.week_start, session.day_of_week);
+      const dateKey = toISODate(date);
+      if (dateKey < todayStr) continue;
+      if (dateKey === todayStr && timeToMin(session.time_start) < nowMin) continue;
+
+      const trainerIds = session.session_trainers?.length
+        ? (session.session_trainers as { user_id: string }[]).map((st) => st.user_id)
+        : session.trainer_id ? [session.trainer_id] : [];
+      const trainerNames = trainerIds.map((id) => profileMap[id]).filter(Boolean);
+
+      sessions.push({
+        id: session.id,
+        dateKey,
+        shortLabel: shortLabel(date),
+        fullLabel: fullLabel(date),
+        timeStart: session.time_start,
+        timeEnd: session.time_end,
+        isCancelled: session.is_cancelled ?? false,
+        sessionTypes: session.session_types ?? [],
+        topics: session.topics ?? [],
+        description: session.description ?? null,
+        location: session.locations
+          ? { name: session.locations.name, mapsUrl: session.locations.maps_url ?? null }
+          : null,
+        trainerNames,
+      });
+    }
+  }
+
+  sessions.sort((a, b) =>
+    a.dateKey.localeCompare(b.dateKey) || a.timeStart.localeCompare(b.timeStart)
+  );
+
+  // Extract unique filter options (only from non-cancelled sessions)
+  const active = sessions.filter((s) => !s.isCancelled);
+  const filterOptions = {
+    types:     [...new Set(active.flatMap((s) => s.sessionTypes))].sort(),
+    topics:    [...new Set(active.flatMap((s) => s.topics))].sort(),
+    trainers:  [...new Set(active.flatMap((s) => s.trainerNames))].sort(),
+    locations: [...new Set(active.flatMap((s) => s.location ? [s.location.name] : []))].sort(),
+  };
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen bg-background">
       <header className="border-b bg-background">
-        <div className="container max-w-5xl mx-auto px-4 py-4">
-          <h1 className="text-2xl font-bold">{club.name}</h1>
+        <div className="container max-w-2xl mx-auto px-4 py-5">
+          <h1 className="text-2xl font-bold" style={{ fontFamily: "var(--font-syne, system-ui)" }}>
+            {club.name}
+          </h1>
           {club.description && (
             <p className="text-muted-foreground text-sm mt-1">{club.description}</p>
           )}
         </div>
       </header>
-
-      <main className="container max-w-5xl mx-auto px-4 py-8">
-        <div className="mb-6">
-          <WeekNav weekStart={weekStart} />
-        </div>
-
-        <h2 className="text-xl font-semibold mb-4">{formatWeekRange(weekStart)}</h2>
-
-        {!week ? (
-          <div className="text-center py-16 text-muted-foreground">
-            <p>Für diese Woche wurde noch kein Trainingsplan veröffentlicht.</p>
-          </div>
-        ) : (
-          <div className="space-y-6">
-            {DAY_NAMES.map((dayName, dayIndex) => {
-              const daySessions = (week.training_sessions ?? [])
-                .filter((s) => s.day_of_week === dayIndex)
-                .sort((a, b) => a.time_start.localeCompare(b.time_start));
-
-              if (!daySessions.length) return null;
-
-              return (
-                <div key={dayIndex}>
-                  <h3 className="font-semibold text-lg border-b pb-2 mb-3">{dayName}</h3>
-                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                    {daySessions.map((session) => {
-                      const trainerIds = session.session_trainers?.length
-                        ? session.session_trainers.map((st) => st.user_id)
-                        : session.trainer_id ? [session.trainer_id] : [];
-                      const trainerNames = trainerIds.map((id) => profileMap[id]).filter(Boolean);
-
-                      const types = session.session_types ?? [];
-                      const topics = session.topics ?? [];
-
-                      return (
-                        <div key={session.id} className="border rounded-lg p-4 bg-card">
-                          <div className="text-sm text-muted-foreground font-mono mb-2">
-                            {formatTime(session.time_start)} – {formatTime(session.time_end)}
-                          </div>
-
-                          {types.length > 0 && (
-                            <div className="flex flex-wrap gap-1 mb-1.5">
-                              {types.map((t) => (
-                                <span key={t} className="inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
-                                  {t}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-
-                          {topics.length > 0 && (
-                            <div className="flex flex-wrap gap-1 mb-1.5">
-                              {topics.map((t) => (
-                                <span key={t} className="inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full bg-secondary text-secondary-foreground">
-                                  {t}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-
-                          {trainerNames.length > 0 && (
-                            <p className="text-sm text-muted-foreground mt-1">
-                              {trainerNames.join(", ")}
-                            </p>
-                          )}
-
-                          {session.locations && (
-                            <p className="text-sm text-muted-foreground flex items-center gap-1 mt-0.5">
-                              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-                                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" /><circle cx="12" cy="10" r="3" />
-                              </svg>
-                              {session.locations.maps_url ? (
-                                <a href={session.locations.maps_url} target="_blank" rel="noopener noreferrer" className="hover:underline">
-                                  {session.locations.name}
-                                </a>
-                              ) : session.locations.name}
-                            </p>
-                          )}
-
-                          {session.description && (
-                            <p className="text-sm text-muted-foreground mt-2 italic">{session.description}</p>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </main>
+      <PublicPlanClient sessions={sessions} filterOptions={filterOptions} />
     </div>
   );
 }

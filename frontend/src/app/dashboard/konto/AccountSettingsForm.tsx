@@ -7,7 +7,6 @@ import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import type { User } from "@supabase/supabase-js";
 import type { Profile } from "@/types";
 import { createClient } from "@/lib/supabase/client";
-import { deleteAccount } from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -215,7 +214,11 @@ export function AccountSettingsForm({
     if (deleteConfirm !== "LÖSCHEN") return;
     setDeleteLoading(true);
     try {
-      await deleteAccount();
+      const res = await fetch("/api/delete-account", { method: "DELETE" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error ?? "Konto konnte nicht gelöscht werden.");
+      }
       const supabase = createClient();
       await supabase.auth.signOut();
       router.push("/");

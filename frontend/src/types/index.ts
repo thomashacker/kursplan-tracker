@@ -98,6 +98,9 @@ export interface TrainingSession {
   session_types: string[]; // audience/level categories (from club_session_types)
   description: string | null;
   trainer_id: string | null; // kept for backward compat (first trainer)
+  is_cancelled: boolean;
+  template_id: string | null; // set if this session was generated from a recurring template
+  is_modified: boolean; // true = user edited this occurrence individually (skip bulk future edits)
   tags: string[];
   notes: string | null;
   created_at: string;
@@ -117,9 +120,13 @@ export interface SessionTemplate {
   time_end: string | null;
   location_id: string | null;
   topic: string | null;
+  topics: string[];
+  session_types: string[];
   description: string | null;
   default_trainer_id: string | null;
+  trainer_ids: string[];
   tags: string[];
+  is_cancelled: boolean;
 }
 
 export const DAY_NAMES = [
