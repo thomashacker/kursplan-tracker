@@ -40,7 +40,10 @@ build: ## Build frontend for production
 # ─────────────────────────────────────────────
 # Quality
 # ─────────────────────────────────────────────
-.PHONY: lint check format
+.PHONY: lint check format test
+test: ## Run frontend unit tests (Vitest)
+	$(MAKE) -C frontend test
+
 lint: ## Run linters (frontend ESLint + backend ruff)
 	$(MAKE) -C frontend lint
 	$(MAKE) -C backend lint

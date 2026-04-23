@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help setup dev build lint check clean
+.PHONY: help setup dev build lint check test clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -30,6 +30,9 @@ lint: ## Run ESLint
 
 check: ## TypeScript type-check (no emit)
 	npx tsc --noEmit
+
+test: ## Run unit tests (Vitest)
+	npm run test
 
 clean: ## Remove .next build output and node_modules cache
 	rm -rf .next

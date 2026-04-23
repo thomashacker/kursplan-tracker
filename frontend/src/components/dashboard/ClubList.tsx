@@ -85,9 +85,11 @@ function ClubCard({ membership, index }: { membership: ClubMembership; index: nu
 export function ClubList({
   memberships,
   userName,
+  canCreateClub,
 }: {
   memberships: ClubMembership[];
   userName: string;
+  canCreateClub: boolean;
 }) {
   const reduced = useReducedMotion();
 
@@ -115,22 +117,24 @@ export function ClubList({
           </p>
         </div>
 
-        <motion.div
-          initial={reduced ? false : { opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ ...spring, delay: 0.1 }}
-        >
-          <Link
-            href="/dashboard/verein/neu"
-            className="inline-flex items-center gap-1.5 h-10 px-4 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:opacity-90 transition-opacity shrink-0"
+        {canCreateClub && (
+          <motion.div
+            initial={reduced ? false : { opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ ...spring, delay: 0.1 }}
           >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden>
-              <path d="M7 2v10M2 7h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-            </svg>
-            <span className="hidden sm:inline">Verein erstellen</span>
-            <span className="sm:hidden">Neu</span>
-          </Link>
-        </motion.div>
+            <Link
+              href="/dashboard/verein/neu"
+              className="inline-flex items-center gap-1.5 h-10 px-4 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:opacity-90 transition-opacity shrink-0"
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden>
+                <path d="M7 2v10M2 7h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+              </svg>
+              <span className="hidden sm:inline">Verein erstellen</span>
+              <span className="sm:hidden">Neu</span>
+            </Link>
+          </motion.div>
+        )}
       </motion.div>
 
       {/* Empty state */}
@@ -157,14 +161,18 @@ export function ClubList({
               Noch kein Verein.
             </p>
             <p className="text-sm text-muted-foreground mb-6 max-w-xs">
-              Erstelle deinen ersten Verein und lade Trainer und Mitglieder ein.
+              {canCreateClub
+                ? "Erstelle deinen ersten Verein und lade Trainer und Mitglieder ein."
+                : "Du wirst einem Verein hinzugefügt, sobald ein Administrator dich einlädt."}
             </p>
-            <Link
-              href="/dashboard/verein/neu"
-              className="inline-flex items-center gap-2 h-11 px-5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:opacity-90 transition-opacity"
-            >
-              Ersten Verein erstellen
-            </Link>
+            {canCreateClub && (
+              <Link
+                href="/dashboard/verein/neu"
+                className="inline-flex items-center gap-2 h-11 px-5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:opacity-90 transition-opacity"
+              >
+                Ersten Verein erstellen
+              </Link>
+            )}
           </div>
         </motion.div>
       ) : (

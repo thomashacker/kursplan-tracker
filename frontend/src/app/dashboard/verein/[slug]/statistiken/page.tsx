@@ -184,7 +184,7 @@ export default async function StatistikenPage({
                     {/* Avatar placeholder */}
                     <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
                       <span className="text-xs font-bold text-primary">
-                        {t.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
+                        {t.name.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase()}
                       </span>
                     </div>
 
