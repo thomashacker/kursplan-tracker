@@ -232,7 +232,7 @@ export default function NeuVereinPage() {
             id="name"
             name="name"
             required
-            placeholder="Viet Vo Dao Berlin"
+            placeholder="SV Musterverein"
             value={name}
             onChange={(e) => handleNameChange(e.target.value)}
             className="h-12 text-base rounded-xl"
@@ -255,7 +255,7 @@ export default function NeuVereinPage() {
               value={slug}
               onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))}
               className="flex-1 h-12 pr-3 text-base bg-transparent outline-none"
-              placeholder="viet-vo-dao-berlin"
+              placeholder="sv-musterverein"
             />
           </div>
           <AnimatePresence>

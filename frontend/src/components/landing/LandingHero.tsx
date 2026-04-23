@@ -75,7 +75,7 @@ export default function LandingHero() {
         <motion.div variants={fade} className="mb-7">
           <span className="inline-flex items-center gap-2 text-xs font-semibold tracking-widest uppercase text-primary border border-primary/30 px-3.5 py-1.5 rounded-full">
             <span className="w-1.5 h-1.5 rounded-full bg-primary" />
-            Für Sportvereine
+            Für Vereine & Teams
           </span>
         </motion.div>
 
@@ -98,7 +98,7 @@ export default function LandingHero() {
           variants={slideUp}
           className="text-base leading-relaxed max-w-[280px] mb-11 text-muted-foreground md:max-w-sm"
         >
-          Koordiniere dein Team, verwalte Standorte und teile Wochenpläne in Sekunden.
+          Koordiniere dein Team, verwalte Standorte und teile Trainingspläne – für jeden Verein.
         </motion.p>
 
         {/* CTA buttons */}

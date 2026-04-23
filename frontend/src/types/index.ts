@@ -148,12 +148,15 @@ export const ROLE_LABELS: Record<Role, string> = {
 };
 
 export const SUGGESTED_TAGS = [
-  "Sparring",
   "Technik",
+  "Taktik",
   "Kondition",
-  "Prüfungsvorbereitung",
+  "Kraft",
+  "Ausdauer",
+  "Teamtraining",
   "Anfänger",
   "Fortgeschritten",
   "Kinder",
   "Erwachsene",
+  "Wettkampfvorbereitung",
 ];

@@ -448,7 +448,7 @@ function LocationsSection({ clubId, initialLocations }: { clubId: string; initia
             className="rounded-xl border border-primary/25 bg-primary/5 p-4 space-y-3 mb-3"
           >
             <p className="text-sm font-medium">Neuen Ort hinzufügen</p>
-            <div className="space-y-1.5"><Label className="text-xs text-muted-foreground">Name *</Label><Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Dojo Tempelhof" className="h-9 rounded-xl text-sm" /></div>
+            <div className="space-y-1.5"><Label className="text-xs text-muted-foreground">Name *</Label><Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Sporthalle Nord" className="h-9 rounded-xl text-sm" /></div>
             <div className="space-y-1.5"><Label className="text-xs text-muted-foreground">Adresse</Label><Input value={newAddress} onChange={(e) => setNewAddress(e.target.value)} placeholder="Musterstraße 1, 10115 Berlin" className="h-9 rounded-xl text-sm" /></div>
             <div className="space-y-1.5"><Label className="text-xs text-muted-foreground">Google Maps Link</Label><Input value={newMapsUrl} onChange={(e) => setNewMapsUrl(e.target.value)} placeholder="https://maps.google.com/..." type="url" className="h-9 rounded-xl text-sm" /></div>
             <div className="space-y-1.5"><Label className="text-xs text-muted-foreground">Notizen</Label><Textarea value={newNotes} onChange={(e) => setNewNotes(e.target.value)} rows={2} placeholder="z. B. Parkplätze, Schlüssel…" className="rounded-xl text-sm resize-none" /></div>
@@ -489,20 +489,20 @@ export function ThemenManager({
     <div className="divide-y divide-border">
       <ChipListSection
         title="Trainingstypen"
-        description="Kategorien für Trainingseinheiten (z. B. Kindertraining, Anfänger)."
+        description="Kategorien für Trainingseinheiten (z. B. Anfänger, Fortgeschritten, Jugend)."
         items={initialSessionTypes}
         emptyText="Noch keine Typen."
-        placeholder="Neuer Typ, z. B. Kindertraining…"
+        placeholder="Neuer Typ, z. B. Anfänger…"
         tableName="club_session_types"
         clubId={clubId}
         deleteNote="Dieser Typ wird aus der Auswahlliste entfernt. Bestehende Trainingseinheiten behalten den Wert."
       />
       <ChipListSection
         title="Trainingsthemen"
-        description="Inhaltliche Themen für Trainingseinheiten (z. B. Tritt-Technik, Sparring)."
+        description="Inhaltliche Themen für Trainingseinheiten (z. B. Technik, Kondition, Taktik)."
         items={initialTopics}
         emptyText="Noch keine Themen."
-        placeholder="Neues Thema, z. B. Sparring…"
+        placeholder="Neues Thema, z. B. Kondition…"
         tableName="club_topics"
         clubId={clubId}
         deleteNote="Dieses Thema wird aus der Auswahlliste entfernt. Bestehende Trainingseinheiten behalten den Wert."
