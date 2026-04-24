@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { notFound } from "next/navigation";
-import type { Club, ClubMembership, TrainingWeek, Location, Profile, ClubTopic, ClubSessionType } from "@/types";
+import type { Club, ClubMembership, TrainingWeek, Location, Profile, ClubTopic, ClubSessionType, VirtualTrainer } from "@/types";
 import { getCurrentMonday } from "@/lib/utils/date";
 import { WeeklyPlanEditor } from "@/components/plan/WeeklyPlanEditor";
 
@@ -42,13 +42,16 @@ export default async function PlanPage({
   // Fetch week with sessions, locations, and session_trainers
   const { data: week } = await supabase
     .from("training_weeks")
-    .select("*, training_sessions(*, locations(*), session_trainers(session_id, user_id))")
+    .select("*, training_sessions(*, locations(*), session_trainers(session_id, user_id, virtual_trainer_id))")
     .eq("club_id", club.id)
     .eq("week_start", weekStart)
     .single<TrainingWeek>();
 
-  // Fetch locations, trainer user_ids, topics, and session types in parallel
-  const [{ data: locations }, { data: trainerMemberships }, { data: topics }, { data: sessionTypes }] = await Promise.all([
+  // Fetch week's session_trainers including virtual_trainer_id
+  // (already handled by the select string below via PostgREST)
+
+  // Fetch locations, trainer user_ids, topics, session types, and virtual trainers in parallel
+  const [{ data: locations }, { data: trainerMemberships }, { data: topics }, { data: sessionTypes }, { data: virtualTrainersRaw }] = await Promise.all([
     supabase.from("locations").select("*").eq("club_id", club.id).returns<Location[]>(),
     supabase
       .from("club_memberships")
@@ -68,6 +71,12 @@ export default async function PlanPage({
       .eq("club_id", club.id)
       .order("name")
       .returns<ClubSessionType[]>(),
+    supabase
+      .from("virtual_trainers")
+      .select("*")
+      .eq("club_id", club.id)
+      .order("name")
+      .returns<VirtualTrainer[]>(),
   ]);
 
   // Fetch profiles separately to avoid the transitive FK join issue with PostgREST
@@ -87,6 +96,7 @@ export default async function PlanPage({
       isAdmin={isAdmin}
       locations={locations ?? []}
       trainers={trainers}
+      virtualTrainers={virtualTrainersRaw ?? []}
       topics={topics ?? []}
       sessionTypes={sessionTypes ?? []}
     />

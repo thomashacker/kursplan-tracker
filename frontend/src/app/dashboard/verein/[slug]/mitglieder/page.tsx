@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import { toast } from "sonner";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { createClient } from "@/lib/supabase/client";
-import type { Club, ClubMembership, Invitation, Role } from "@/types";
+import type { Club, ClubMembership, Invitation, Role, VirtualTrainer } from "@/types";
 import { ROLE_LABELS } from "@/types";
 import {
   Select,
@@ -53,6 +53,15 @@ export default function MitgliederPage() {
   const [myRole, setMyRole] = useState<Role | null>(null);
   const [myUserId, setMyUserId] = useState<string | null>(null);
 
+  // Virtual trainers
+  const [virtualTrainers, setVirtualTrainers] = useState<VirtualTrainer[]>([]);
+  const [trainerDialog, setTrainerDialog] = useState<{ mode: "add" | "edit"; trainer?: VirtualTrainer } | null>(null);
+  const [trainerName, setTrainerName] = useState("");
+  const [trainerAvatarUrl, setTrainerAvatarUrl] = useState("");
+  const [trainerNotes, setTrainerNotes] = useState("");
+  const [trainerSaving, setTrainerSaving] = useState(false);
+  const [removeTrainerTarget, setRemoveTrainerTarget] = useState<VirtualTrainer | null>(null);
+
   // Remove member confirm
   const [removeTarget, setRemoveTarget] = useState<{ id: string; name: string } | null>(null);
   // Open actions menu
@@ -84,8 +93,8 @@ export default function MitgliederPage() {
     setClub(c);
     if (!c) return;
 
-    // Fetch memberships and invitations in parallel
-    const [{ data: m }, { data: inv }] = await Promise.all([
+    // Fetch memberships, invitations, and virtual trainers in parallel
+    const [{ data: m }, { data: inv }, { data: vt }] = await Promise.all([
       supabase
         .from("club_memberships")
         .select("*")
@@ -98,7 +107,9 @@ export default function MitgliederPage() {
         .is("used_at", null)
         .gt("expires_at", new Date().toISOString())
         .returns<Invitation[]>(),
+      supabase.from("virtual_trainers").select("*").eq("club_id", c.id).order("name").returns<VirtualTrainer[]>(),
     ]);
+    setVirtualTrainers(vt ?? []);
 
     const rawMemberships = (m ?? []) as ClubMembership[];
     const mine = rawMemberships.find((x) => x.user_id === user.id);
@@ -195,6 +206,56 @@ export default function MitgliederPage() {
     if (error) { toast.error(error.message); return; }
     setPendingInvites((prev) => prev.filter((i) => i.id !== id));
     toast.success("Einladung widerrufen.");
+  }
+
+  // ── virtual trainer dialog helpers ───────────────────────────
+  function openAddTrainer() {
+    setTrainerName("");
+    setTrainerAvatarUrl("");
+    setTrainerNotes("");
+    setTrainerDialog({ mode: "add" });
+  }
+
+  function openEditTrainer(vt: VirtualTrainer) {
+    setTrainerName(vt.name);
+    setTrainerAvatarUrl(vt.avatar_url ?? "");
+    setTrainerNotes(vt.notes ?? "");
+    setTrainerDialog({ mode: "edit", trainer: vt });
+  }
+
+  async function handleSaveTrainer() {
+    if (!club || !trainerName.trim()) return;
+    setTrainerSaving(true);
+    const supabase = createClient();
+    const payload = {
+      club_id: club.id,
+      name: trainerName.trim(),
+      avatar_url: trainerAvatarUrl.trim() || null,
+      notes: trainerNotes.trim() || null,
+    };
+
+    if (trainerDialog?.mode === "add") {
+      const { error } = await supabase.from("virtual_trainers").insert(payload);
+      if (error) { toast.error(error.message); setTrainerSaving(false); return; }
+      toast.success(`${payload.name} hinzugefügt.`);
+    } else if (trainerDialog?.trainer) {
+      const { error } = await supabase.from("virtual_trainers").update(payload).eq("id", trainerDialog.trainer.id);
+      if (error) { toast.error(error.message); setTrainerSaving(false); return; }
+      toast.success("Trainer aktualisiert.");
+    }
+    setTrainerSaving(false);
+    setTrainerDialog(null);
+    load();
+  }
+
+  async function handleDeleteTrainer() {
+    if (!removeTrainerTarget) return;
+    const supabase = createClient();
+    const { error } = await supabase.from("virtual_trainers").delete().eq("id", removeTrainerTarget.id);
+    if (error) { toast.error(error.message); return; }
+    toast.success(`${removeTrainerTarget.name} entfernt.`);
+    setRemoveTrainerTarget(null);
+    load();
   }
 
   const isAdmin = myRole === "admin";
@@ -319,6 +380,105 @@ export default function MitgliederPage() {
         </AnimatePresence>
       </div>
 
+      {/* ── Feste Trainer ───────────────────────────────────── */}
+      {(isAdmin || virtualTrainers.length > 0) && (
+        <div className="mb-8">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+              Feste Trainer
+            </p>
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={openAddTrainer}
+                className="inline-flex items-center gap-1.5 h-7 px-3 rounded-lg border border-border text-xs font-medium hover:bg-secondary transition-colors"
+              >
+                <svg width="10" height="10" viewBox="0 0 14 14" fill="none" aria-hidden>
+                  <path d="M7 2v10M2 7h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                </svg>
+                Trainer hinzufügen
+              </button>
+            )}
+          </div>
+
+          {virtualTrainers.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border bg-card py-8 text-center">
+              <p className="text-sm text-muted-foreground">Noch keine festen Trainer.</p>
+              {isAdmin && (
+                <button type="button" onClick={openAddTrainer} className="mt-2 text-xs text-primary hover:underline">
+                  Ersten Trainer hinzufügen
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {virtualTrainers.map((vt, i) => {
+                const initials = vt.name.split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 2);
+                return (
+                  <motion.div
+                    key={vt.id}
+                    initial={reduced ? false : { opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ ...spring, delay: i * 0.04 }}
+                    className="flex items-center gap-3 p-3 rounded-xl border border-border bg-card"
+                  >
+                    {/* Avatar */}
+                    <div className="shrink-0 w-10 h-10 rounded-full bg-indigo-500/10 overflow-hidden flex items-center justify-center">
+                      {vt.avatar_url ? (
+                        /* eslint-disable-next-line @next/next/no-img-element */
+                        <img src={vt.avatar_url} alt={vt.name} className="w-full h-full object-cover" />
+                      ) : (
+                        <span className="font-bold text-indigo-700 dark:text-indigo-400 text-xs" style={{ fontFamily: "var(--font-syne, system-ui)" }}>
+                          {initials}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Info */}
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-sm truncate">{vt.name}</p>
+                      {vt.notes && <p className="text-xs text-muted-foreground truncate">{vt.notes}</p>}
+                    </div>
+
+                    {/* Badge */}
+                    <span className="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 shrink-0">
+                      Trainer
+                    </span>
+
+                    {/* Actions — admin only */}
+                    {isAdmin && (
+                      <div className="flex gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => openEditTrainer(vt)}
+                          className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-secondary text-muted-foreground transition-colors"
+                          aria-label="Bearbeiten"
+                        >
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                          </svg>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setRemoveTrainerTarget(vt)}
+                          className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
+                          aria-label="Entfernen"
+                        >
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M18 6L6 18M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    )}
+                  </motion.div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── Pending invites ──────────────────────────────────── */}
       {isAdmin && pendingInvites.length > 0 && (
         <div>
@@ -440,6 +600,95 @@ export default function MitgliederPage() {
         destructive
         onConfirm={confirmRemoveMember}
         onClose={() => setRemoveTarget(null)}
+      />
+
+      {/* ── Add / Edit virtual trainer dialog ───────────────── */}
+      <Dialog open={trainerDialog !== null} onOpenChange={(open) => { if (!open) setTrainerDialog(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold" style={{ fontFamily: "var(--font-syne, system-ui)" }}>
+              {trainerDialog?.mode === "add" ? "Trainer hinzufügen" : "Trainer bearbeiten"}
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 pt-1">
+            <div className="space-y-1.5">
+              <Label htmlFor="trainer-name" className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Name <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="trainer-name"
+                value={trainerName}
+                onChange={(e) => setTrainerName(e.target.value)}
+                placeholder="Max Mustermann"
+                className="h-10 rounded-xl text-sm"
+                onKeyDown={(e) => { if (e.key === "Enter" && trainerName.trim()) handleSaveTrainer(); }}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="trainer-avatar" className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Avatar-URL <span className="text-muted-foreground/60 font-normal normal-case">(optional)</span>
+              </Label>
+              <Input
+                id="trainer-avatar"
+                value={trainerAvatarUrl}
+                onChange={(e) => setTrainerAvatarUrl(e.target.value)}
+                placeholder="https://…"
+                className="h-10 rounded-xl text-sm"
+              />
+              {trainerAvatarUrl && (
+                <div className="flex items-center gap-2 mt-1">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={trainerAvatarUrl} alt="Vorschau" className="w-10 h-10 rounded-full object-cover border border-border" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                  <p className="text-xs text-muted-foreground">Vorschau</p>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="trainer-notes" className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Notiz <span className="text-muted-foreground/60 font-normal normal-case">(optional)</span>
+              </Label>
+              <Input
+                id="trainer-notes"
+                value={trainerNotes}
+                onChange={(e) => setTrainerNotes(e.target.value)}
+                placeholder="z.B. Kampfsport, Kinder-Training…"
+                className="h-10 rounded-xl text-sm"
+              />
+            </div>
+
+            <div className="flex gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setTrainerDialog(null)}
+                className="h-10 px-4 rounded-xl border border-border text-sm font-medium hover:bg-secondary transition-colors"
+              >
+                Abbrechen
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveTrainer}
+                disabled={trainerSaving || !trainerName.trim()}
+                className="flex-1 h-10 rounded-xl bg-primary text-primary-foreground text-sm font-semibold disabled:opacity-40 hover:opacity-90 transition-opacity"
+              >
+                {trainerSaving ? "Wird gespeichert…" : "Speichern"}
+              </button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Delete virtual trainer confirm ───────────────────── */}
+      <ConfirmDialog
+        open={removeTrainerTarget !== null}
+        title="Trainer entfernen"
+        description={`${removeTrainerTarget?.name} wirklich entfernen? Bestehende Trainingszuweisungen werden ebenfalls gelöscht.`}
+        confirmLabel="Entfernen"
+        destructive
+        onConfirm={handleDeleteTrainer}
+        onClose={() => setRemoveTrainerTarget(null)}
       />
     </div>
   );

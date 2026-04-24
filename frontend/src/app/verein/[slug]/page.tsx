@@ -60,7 +60,7 @@ export default async function PublicPlanPage({
 
   const { data: weeks } = await supabase
     .from("training_weeks")
-    .select("*, training_sessions(*, locations(*), session_trainers(user_id))")
+    .select("*, training_sessions(*, locations(*), session_trainers(user_id, virtual_trainer_id))")
     .eq("club_id", club.id)
     .eq("is_published", true)
     .gte("week_start", monday)
@@ -70,16 +70,36 @@ export default async function PublicPlanPage({
 
   // Resolve trainer names
   const allSessions = (weeks ?? []).flatMap((w) => w.training_sessions ?? []);
+
+  type RawST = { user_id: string | null; virtual_trainer_id: string | null };
+
   const allTrainerIds = [...new Set(
     allSessions.flatMap((s) =>
-      s.session_trainers?.map((st: { user_id: string }) => st.user_id) ?? (s.trainer_id ? [s.trainer_id] : [])
+      s.session_trainers
+        ? (s.session_trainers as RawST[]).filter((st) => st.user_id).map((st) => st.user_id!)
+        : (s.trainer_id ? [s.trainer_id] : [])
     )
   )];
-  const { data: trainerProfiles } = allTrainerIds.length
-    ? await supabase.from("profiles").select("id, full_name, avatar_url").in("id", allTrainerIds)
-    : { data: [] };
+  const allVirtualTrainerIds = [...new Set(
+    allSessions.flatMap((s) =>
+      (s.session_trainers as RawST[] | undefined ?? []).filter((st) => st.virtual_trainer_id).map((st) => st.virtual_trainer_id!)
+    )
+  )];
+
+  const [{ data: trainerProfiles }, { data: virtualTrainerProfiles }] = await Promise.all([
+    allTrainerIds.length
+      ? supabase.from("profiles").select("id, full_name, avatar_url").in("id", allTrainerIds)
+      : Promise.resolve({ data: [] }),
+    allVirtualTrainerIds.length
+      ? supabase.from("virtual_trainers").select("id, name, avatar_url").in("id", allVirtualTrainerIds)
+      : Promise.resolve({ data: [] }),
+  ]);
+
   const profileMap = Object.fromEntries(
     (trainerProfiles ?? []).map((p) => [p.id, { name: p.full_name as string, avatarUrl: p.avatar_url as string | null }])
+  );
+  const virtualProfileMap = Object.fromEntries(
+    (virtualTrainerProfiles ?? []).map((vt) => [vt.id, { name: vt.name as string, avatarUrl: vt.avatar_url as string | null }])
   );
 
   // Build serializable flat list
@@ -96,16 +116,22 @@ export default async function PublicPlanPage({
       if (dateKey < todayStr) continue;
       if (dateKey === todayStr && timeToMin(session.time_start) < nowMin) continue;
 
-      const trainerIds = session.session_trainers?.length
-        ? (session.session_trainers as { user_id: string }[]).map((st) => st.user_id)
+      const rawSTs = (session.session_trainers ?? []) as RawST[];
+      const trainerIds = rawSTs.length
+        ? rawSTs.filter((st) => st.user_id).map((st) => st.user_id!)
         : session.trainer_id ? [session.trainer_id] : [];
+      const virtualTrainerIds = rawSTs.filter((st) => st.virtual_trainer_id).map((st) => st.virtual_trainer_id!);
       const registeredTrainers = trainerIds
         .map((id) => profileMap[id])
+        .filter((p): p is { name: string; avatarUrl: string | null } => Boolean(p));
+      const virtualTrainers = virtualTrainerIds
+        .map((id) => virtualProfileMap[id])
         .filter((p): p is { name: string; avatarUrl: string | null } => Boolean(p));
       const guestTrainers: { name: string; avatarUrl: null; isGuest: true }[] =
         (session.guest_trainers ?? []).map((name: string) => ({ name, avatarUrl: null, isGuest: true as const }));
       const trainers = [
         ...registeredTrainers.map((p) => ({ ...p, isGuest: false as const })),
+        ...virtualTrainers.map((p) => ({ ...p, isGuest: false as const })),
         ...guestTrainers,
       ];
       const trainerNames = trainers.map((t) => t.name);

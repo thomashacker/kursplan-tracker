@@ -80,9 +80,19 @@ export interface ClubSessionType {
   created_at: string;
 }
 
+export interface VirtualTrainer {
+  id: string;
+  club_id: string;
+  name: string;
+  avatar_url: string | null;
+  notes: string | null;
+  created_at: string;
+}
+
 export interface SessionTrainer {
   session_id: string;
-  user_id: string;
+  user_id: string | null;
+  virtual_trainer_id?: string | null;
   profiles?: Pick<Profile, "id" | "full_name">;
 }
 
@@ -127,6 +137,7 @@ export interface SessionTemplate {
   description: string | null;
   default_trainer_id: string | null;
   trainer_ids: string[];
+  virtual_trainer_ids: string[];
   guest_trainers: string[];
   tags: string[];
   is_cancelled: boolean;

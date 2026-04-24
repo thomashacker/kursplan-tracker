@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import type { TrainingSession, Location, Profile, ClubTopic, ClubSessionType, SessionColor } from "@/types";
+import type { TrainingSession, Location, Profile, ClubTopic, ClubSessionType, SessionColor, VirtualTrainer } from "@/types";
 import { DAY_NAMES, SESSION_COLORS } from "@/types";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -38,6 +38,7 @@ export interface SessionSaveData {
   /** Whether the cron job should keep extending this template automatically */
   auto_extend: boolean;
   color: SessionColor | null;
+  virtual_trainer_ids: string[];
 }
 
 interface Props {
@@ -45,6 +46,7 @@ interface Props {
   defaultDay: number;
   locations: Location[];
   trainers: Profile[];
+  virtualTrainers: VirtualTrainer[];
   topics: ClubTopic[];
   sessionTypes: ClubSessionType[];
   onSave: (data: SessionSaveData) => Promise<void>;
@@ -313,6 +315,7 @@ export function SessionEditModal({
   defaultDay,
   locations,
   trainers,
+  virtualTrainers,
   topics,
   sessionTypes,
   onSave,
@@ -327,9 +330,14 @@ export function SessionEditModal({
   const [locationId, setLocationId] = useState<string>(session?.location_id ?? "none");
 
   const initTrainers: string[] = session?.session_trainers?.length
-    ? session.session_trainers.map((st) => st.user_id)
+    ? session.session_trainers.filter((st) => st.user_id).map((st) => st.user_id!)
     : session?.trainer_id ? [session.trainer_id] : [];
+  const initVirtualTrainers: string[] = session?.session_trainers
+    ?.filter((st) => st.virtual_trainer_id)
+    .map((st) => st.virtual_trainer_id!) ?? [];
+
   const [selectedTrainerIds, setSelectedTrainerIds] = useState<string[]>(initTrainers);
+  const [selectedVirtualTrainerIds, setSelectedVirtualTrainerIds] = useState<string[]>(initVirtualTrainers);
   const [guestTrainers, setGuestTrainers] = useState<string[]>(session?.guest_trainers ?? []);
   const [selectedTopics, setSelectedTopics] = useState<string[]>(session?.topics ?? []);
   const [selectedTypes, setSelectedTypes] = useState<string[]>(session?.session_types ?? []);
@@ -366,6 +374,7 @@ export function SessionEditModal({
       description: ((form.get("description") as string) ?? "").trim() || null,
       location_id: locationId === "none" ? null : locationId,
       trainer_ids: selectedTrainerIds,
+      virtual_trainer_ids: selectedVirtualTrainerIds,
       guest_trainers: guestTrainers,
       is_cancelled: isCancelled,
       is_recurring: isNew ? makeRecurring : false,
@@ -525,6 +534,18 @@ export function SessionEditModal({
             placeholder="Trainer hinzufügen…"
             emptyText="Keine Trainer oder Admins im Verein."
           />
+
+          {/* Virtual trainers (club-level, no login required) */}
+          {virtualTrainers.length > 0 && (
+            <MultiTagSelect
+              label="Feste Trainer"
+              options={virtualTrainers.map((vt) => ({ id: vt.id, label: vt.name }))}
+              selected={selectedVirtualTrainerIds}
+              onAdd={(id) => add(setSelectedVirtualTrainerIds, id)}
+              onRemove={(id) => remove(setSelectedVirtualTrainerIds, id)}
+              placeholder="Festen Trainer hinzufügen…"
+            />
+          )}
 
           {/* Guest trainers */}
           <GuestTrainerInput value={guestTrainers} onChange={setGuestTrainers} />

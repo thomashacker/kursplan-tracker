@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
 import { motion, useReducedMotion } from "framer-motion";
-import type { Club, TrainingWeek, TrainingSession, Location, Profile, ClubTopic, ClubSessionType, SessionColor } from "@/types";
+import type { Club, TrainingWeek, TrainingSession, Location, Profile, ClubTopic, ClubSessionType, SessionColor, VirtualTrainer } from "@/types";
 import { DAY_NAMES, SESSION_COLORS } from "@/types";
 import { formatTime, formatWeekRange, offsetWeek, getCurrentMonday, toISODate } from "@/lib/utils/date";
 import { createClient } from "@/lib/supabase/client";
@@ -32,6 +32,7 @@ interface Props {
   isAdmin: boolean;
   locations: Location[];
   trainers: Profile[];
+  virtualTrainers: VirtualTrainer[];
   topics: ClubTopic[];
   sessionTypes: ClubSessionType[];
 }
@@ -222,6 +223,7 @@ function DayTimetable({
   weekStart,
   sessions,
   trainers,
+  virtualTrainers,
   canEdit,
   onEdit,
   onDelete,
@@ -232,6 +234,7 @@ function DayTimetable({
   weekStart: string;
   sessions: TrainingSession[];
   trainers: Profile[];
+  virtualTrainers: VirtualTrainer[];
   canEdit: boolean;
   onEdit: (s: TrainingSession) => void;
   onDelete: (s: TrainingSession) => void;
@@ -318,9 +321,13 @@ function DayTimetable({
                 const pct    = 100 / info.totalLanes;
 
                 const trainerProfiles = (s.session_trainers?.length
-                  ? s.session_trainers.map((st) => trainers.find((t) => t.id === st.user_id))
+                  ? s.session_trainers.filter((st) => st.user_id).map((st) => trainers.find((t) => t.id === st.user_id))
                   : trainers.filter((t) => t.id === s.trainer_id)
                 ).filter((t): t is Profile => Boolean(t));
+                const virtualTrainerDisplays = (s.session_trainers ?? [])
+                  .filter((st) => st.virtual_trainer_id)
+                  .map((st) => virtualTrainers.find((vt) => vt.id === st.virtual_trainer_id))
+                  .filter((vt): vt is VirtualTrainer => Boolean(vt));
                 const guestTrainers = s.guest_trainers ?? [];
 
                 const types  = s.session_types ?? [];
@@ -371,7 +378,7 @@ function DayTimetable({
                       </div>
                     )}
 
-                    {height >= 80 && (trainerProfiles.length > 0 || guestTrainers.length > 0) && (
+                    {height >= 80 && (trainerProfiles.length > 0 || virtualTrainerDisplays.length > 0 || guestTrainers.length > 0) && (
                       <div className="flex flex-wrap items-center gap-1 mt-0.5">
                         {trainerProfiles.map((t) => (
                           <span key={t.id} className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
@@ -384,6 +391,19 @@ function DayTimetable({
                               </span>
                             )}
                             {t.full_name}
+                          </span>
+                        ))}
+                        {virtualTrainerDisplays.map((vt) => (
+                          <span key={vt.id} className="inline-flex items-center gap-1 text-[11px] text-indigo-700 dark:text-indigo-400">
+                            {vt.avatar_url ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={vt.avatar_url} alt={vt.name} className="w-3.5 h-3.5 rounded-full object-cover shrink-0" />
+                            ) : (
+                              <span className="w-3.5 h-3.5 rounded-full bg-indigo-500/15 border border-indigo-500/30 flex items-center justify-center text-[7px] font-bold shrink-0">
+                                {vt.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
+                              </span>
+                            )}
+                            {vt.name}
                           </span>
                         ))}
                         {guestTrainers.map((name) => (
@@ -444,10 +464,12 @@ function DayTimetable({
 function NextTrainingView({
   sessions,
   trainers,
+  virtualTrainers,
   weekStart,
 }: {
   sessions: TrainingSession[];
   trainers: Profile[];
+  virtualTrainers: VirtualTrainer[];
   weekStart: string;
 }) {
   const todayIdx = todayDayIndexInWeek(weekStart);
@@ -484,9 +506,13 @@ function NextTrainingView({
   }
 
   const trainerProfiles = (next.session_trainers?.length
-    ? next.session_trainers.map((st) => trainers.find((t) => t.id === st.user_id))
+    ? next.session_trainers.filter((st) => st.user_id).map((st) => trainers.find((t) => t.id === st.user_id))
     : trainers.filter((t) => t.id === next.trainer_id)
   ).filter((t): t is Profile => Boolean(t));
+  const nextVirtualTrainers = (next.session_trainers ?? [])
+    .filter((st) => st.virtual_trainer_id)
+    .map((st) => virtualTrainers.find((vt) => vt.id === st.virtual_trainer_id))
+    .filter((vt): vt is VirtualTrainer => Boolean(vt));
 
   const isToday = next.day_of_week === todayIdx;
 
@@ -514,10 +540,10 @@ function NextTrainingView({
               {next.locations.name}
             </span>
           )}
-          {trainerProfiles.length > 0 && (
+          {(trainerProfiles.length > 0 || nextVirtualTrainers.length > 0) && (
             <span className="flex items-center gap-1">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-              {trainerProfiles.map((t) => t.full_name).join(", ")}
+              {[...trainerProfiles.map((t) => t.full_name), ...nextVirtualTrainers.map((vt) => vt.name)].join(", ")}
             </span>
           )}
         </div>
@@ -530,9 +556,14 @@ function NextTrainingView({
           <div className="space-y-2">
             {remaining.map((s) => {
               const sp = (s.session_trainers?.length
-                ? s.session_trainers.map((st) => trainers.find((t) => t.id === st.user_id))
+                ? s.session_trainers.filter((st) => st.user_id).map((st) => trainers.find((t) => t.id === st.user_id))
                 : trainers.filter((t) => t.id === s.trainer_id)
               ).filter((t): t is Profile => Boolean(t));
+              const svt = (s.session_trainers ?? [])
+                .filter((st) => st.virtual_trainer_id)
+                .map((st) => virtualTrainers.find((vt) => vt.id === st.virtual_trainer_id))
+                .filter((vt): vt is VirtualTrainer => Boolean(vt));
+              const allNames = [...sp.map((t) => t.full_name), ...svt.map((vt) => vt.name)];
               return (
                 <div key={s.id} className="flex items-start gap-4 p-3 rounded-xl border border-border bg-card">
                   <div className="shrink-0 text-right">
@@ -541,7 +572,7 @@ function NextTrainingView({
                   </div>
                   <div>
                     <p className="text-sm font-semibold">{sessionLabel(s)}</p>
-                    {sp.length > 0 && <p className="text-xs text-muted-foreground">{sp.map((t) => t.full_name).join(", ")}</p>}
+                    {allNames.length > 0 && <p className="text-xs text-muted-foreground">{allNames.join(", ")}</p>}
                   </div>
                 </div>
               );
@@ -563,6 +594,7 @@ export function WeeklyPlanEditor({
   isAdmin,
   locations,
   trainers,
+  virtualTrainers,
   topics,
   sessionTypes,
 }: Props) {
@@ -726,12 +758,20 @@ export function WeeklyPlanEditor({
     setEditingSession("new");
   }
 
-  // Helper: replace session_trainers for a single session
-  async function saveTrainers(supabase: ReturnType<typeof createClient>, sessionId: string, trainerIds: string[]) {
+  // Helper: replace session_trainers for a single session (real + virtual)
+  async function saveTrainers(
+    supabase: ReturnType<typeof createClient>,
+    sessionId: string,
+    trainerIds: string[],
+    virtualTrainerIds: string[],
+  ) {
     await supabase.from("session_trainers").delete().eq("session_id", sessionId);
-    if (trainerIds.length > 0) {
-      await supabase.from("session_trainers")
-        .insert(trainerIds.map((uid) => ({ session_id: sessionId, user_id: uid })));
+    const rows = [
+      ...trainerIds.map((uid) => ({ session_id: sessionId, user_id: uid, virtual_trainer_id: null })),
+      ...virtualTrainerIds.map((vid) => ({ session_id: sessionId, user_id: null, virtual_trainer_id: vid })),
+    ];
+    if (rows.length > 0) {
+      await supabase.from("session_trainers").insert(rows);
     }
   }
 
@@ -743,8 +783,8 @@ export function WeeklyPlanEditor({
     data: {
       day_of_week: number; time_start: string; time_end: string;
       location_id: string | null; topics: string[]; session_types: string[];
-      description: string | null; trainer_ids: string[]; is_cancelled: boolean;
-      color: string | null;
+      description: string | null; trainer_ids: string[]; virtual_trainer_ids: string[];
+      is_cancelled: boolean; color: string | null;
     },
     fromWeekStart: string,
     numWeeks: number,
@@ -806,17 +846,19 @@ export function WeeklyPlanEditor({
       .insert(sessionRows)
       .select("id");
 
-    if (data.trainer_ids.length > 0 && createdSessions) {
-      await supabase.from("session_trainers").insert(
-        createdSessions.flatMap((s) => data.trainer_ids.map((uid) => ({ session_id: s.id, user_id: uid })))
-      );
+    if ((data.trainer_ids.length > 0 || data.virtual_trainer_ids.length > 0) && createdSessions) {
+      const rows = createdSessions.flatMap((s) => [
+        ...data.trainer_ids.map((uid) => ({ session_id: s.id, user_id: uid, virtual_trainer_id: null })),
+        ...data.virtual_trainer_ids.map((vid) => ({ session_id: s.id, user_id: null, virtual_trainer_id: vid })),
+      ]);
+      if (rows.length > 0) await supabase.from("session_trainers").insert(rows);
     }
   }
 
   async function handleSaveSession(data: SessionSaveData) {
     suppressRealtimeRef.current = true;
     const supabase = createClient();
-    const { trainer_ids, is_recurring, edit_scope, auto_extend, ...sessionData } = data;
+    const { trainer_ids, virtual_trainer_ids, is_recurring, edit_scope, auto_extend, ...sessionData } = data;
     const sessionFields = { ...sessionData, trainer_id: trainer_ids[0] ?? null, guest_trainers: data.guest_trainers };
 
     // ── Case 1: New one-off session ───────────────────────────
@@ -828,7 +870,7 @@ export function WeeklyPlanEditor({
         .insert({ ...sessionFields, week_id: weekId, template_id: null, is_modified: false })
         .select("id").single();
       if (error) { toast.error(error.message); return; }
-      await saveTrainers(supabase, created.id, trainer_ids);
+      await saveTrainers(supabase, created.id, trainer_ids, virtual_trainer_ids);
       toast.success("Sitzung erstellt.");
     }
 
@@ -851,6 +893,7 @@ export function WeeklyPlanEditor({
           description: data.description,
           default_trainer_id: trainer_ids[0] ?? null,
           trainer_ids,
+          virtual_trainer_ids,
           guest_trainers: data.guest_trainers,
           is_cancelled: data.is_cancelled,
           color: data.color,
@@ -871,7 +914,7 @@ export function WeeklyPlanEditor({
         .from("training_sessions")
         .update(sessionFields).eq("id", editingSession!.id);
       if (error) { toast.error(error.message); return; }
-      await saveTrainers(supabase, editingSession!.id, trainer_ids);
+      await saveTrainers(supabase, editingSession!.id, trainer_ids, virtual_trainer_ids);
       toast.success("Gespeichert.");
     }
 
@@ -881,7 +924,7 @@ export function WeeklyPlanEditor({
         .from("training_sessions")
         .update({ ...sessionFields, is_modified: true }).eq("id", editingSession!.id);
       if (error) { toast.error(error.message); return; }
-      await saveTrainers(supabase, editingSession!.id, trainer_ids);
+      await saveTrainers(supabase, editingSession!.id, trainer_ids, virtual_trainer_ids);
       toast.success("Diese Woche aktualisiert.");
     }
 
@@ -902,6 +945,7 @@ export function WeeklyPlanEditor({
         guest_trainers: data.guest_trainers,
         is_cancelled: data.is_cancelled,
         color: data.color,
+        virtual_trainer_ids,
         auto_extend,
       }).eq("id", templateId);
 
@@ -934,10 +978,12 @@ export function WeeklyPlanEditor({
         // Replace session_trainers for all affected sessions
         if (futureIds.length > 0) {
           await supabase.from("session_trainers").delete().in("session_id", futureIds);
-          if (trainer_ids.length > 0) {
-            await supabase.from("session_trainers").insert(
-              futureIds.flatMap((sid) => trainer_ids.map((uid) => ({ session_id: sid, user_id: uid })))
-            );
+          const trainerRows = futureIds.flatMap((sid) => [
+            ...trainer_ids.map((uid) => ({ session_id: sid, user_id: uid, virtual_trainer_id: null })),
+            ...virtual_trainer_ids.map((vid) => ({ session_id: sid, user_id: null, virtual_trainer_id: vid })),
+          ]);
+          if (trainerRows.length > 0) {
+            await supabase.from("session_trainers").insert(trainerRows);
           }
         }
       }
@@ -1192,6 +1238,7 @@ export function WeeklyPlanEditor({
               weekStart={weekStart}
               sessions={sessions}
               trainers={trainers}
+              virtualTrainers={virtualTrainers}
               canEdit={canEdit}
               onEdit={(s) => setEditingSession(s)}
               onDelete={requestDelete}
@@ -1245,7 +1292,7 @@ export function WeeklyPlanEditor({
                             <p className="text-xs text-muted-foreground/50 py-1 px-1">Kein Training</p>
                           ) : (
                             daySessions.map((session) => (
-                              <SessionCard key={session.id} session={session} trainers={trainers} canEdit={canEdit} isToday={isToday} onEdit={() => setEditingSession(session)} onDelete={() => requestDelete(session)} />
+                              <SessionCard key={session.id} session={session} trainers={trainers} virtualTrainers={virtualTrainers} canEdit={canEdit} isToday={isToday} onEdit={() => setEditingSession(session)} onDelete={() => requestDelete(session)} />
                             ))
                           )}
                         </div>
@@ -1280,7 +1327,7 @@ export function WeeklyPlanEditor({
                       </button>
                       <div className="flex-1 space-y-2">
                         {daySessions.map((session) => (
-                          <SessionCard key={session.id} session={session} trainers={trainers} canEdit={canEdit} isToday={isToday} onEdit={() => setEditingSession(session)} onDelete={() => requestDelete(session)} />
+                          <SessionCard key={session.id} session={session} trainers={trainers} virtualTrainers={virtualTrainers} canEdit={canEdit} isToday={isToday} onEdit={() => setEditingSession(session)} onDelete={() => requestDelete(session)} />
                         ))}
                         {canEdit && (
                           <button onClick={() => openNewSession(dayIndex)} className="w-full text-xs text-muted-foreground/50 border border-dashed border-border rounded-xl py-2 hover:border-primary/40 hover:text-primary transition-colors">
@@ -1311,6 +1358,7 @@ export function WeeklyPlanEditor({
           defaultDay={editingSession === "new" ? newSessionDay : editingSession.day_of_week}
           locations={locations}
           trainers={trainers}
+          virtualTrainers={virtualTrainers}
           topics={topics}
           sessionTypes={sessionTypes}
           onSave={handleSaveSession}

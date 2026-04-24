@@ -1,25 +1,31 @@
-import type { TrainingSession, Profile, SessionColor } from "@/types";
+import type { TrainingSession, Profile, SessionColor, VirtualTrainer } from "@/types";
 import { SESSION_COLORS } from "@/types";
 import { formatTime } from "@/lib/utils/date";
 
 interface Props {
   session: TrainingSession;
   trainers: Profile[];
+  virtualTrainers: VirtualTrainer[];
   canEdit: boolean;
   isToday?: boolean;
   onEdit: () => void;
   onDelete: () => void;
 }
 
-export function SessionCard({ session, trainers, canEdit, isToday, onEdit, onDelete }: Props) {
+export function SessionCard({ session, trainers, virtualTrainers, canEdit, isToday, onEdit, onDelete }: Props) {
   const cancelled = session.is_cancelled;
   const colorKey = (session.color ?? "neutral") as SessionColor;
   const colorCfg = SESSION_COLORS[colorKey] ?? SESSION_COLORS.neutral;
   const hasColor = colorKey !== "neutral" && !cancelled;
 
   const trainerProfiles: Profile[] = session.session_trainers?.length
-    ? session.session_trainers.map((st) => trainers.find((t) => t.id === st.user_id)).filter((t): t is Profile => Boolean(t))
+    ? session.session_trainers.filter((st) => st.user_id).map((st) => trainers.find((t) => t.id === st.user_id)).filter((t): t is Profile => Boolean(t))
     : trainers.filter((t) => t.id === session.trainer_id);
+
+  const virtualTrainerDisplays: VirtualTrainer[] = (session.session_trainers ?? [])
+    .filter((st) => st.virtual_trainer_id)
+    .map((st) => virtualTrainers.find((vt) => vt.id === st.virtual_trainer_id))
+    .filter((vt): vt is VirtualTrainer => Boolean(vt));
 
   const types = session.session_types ?? [];
   const topics = session.topics ?? [];
@@ -94,8 +100,8 @@ export function SessionCard({ session, trainers, canEdit, isToday, onEdit, onDel
         <p className="text-xs text-muted-foreground/60 mb-1.5 italic">Kein Typ / Thema</p>
       )}
 
-      {/* Trainers + guests */}
-      {(trainerProfiles.length > 0 || (session.guest_trainers?.length ?? 0) > 0) && (
+      {/* Trainers, virtual trainers + guests */}
+      {(trainerProfiles.length > 0 || virtualTrainerDisplays.length > 0 || (session.guest_trainers?.length ?? 0) > 0) && (
         <div className="flex flex-wrap items-center gap-1.5 mt-1">
           {trainerProfiles.map((t) => (
             <span key={t.id} className="inline-flex items-center gap-1 text-xs text-muted-foreground">
@@ -108,6 +114,19 @@ export function SessionCard({ session, trainers, canEdit, isToday, onEdit, onDel
                 </span>
               )}
               {t.full_name}
+            </span>
+          ))}
+          {virtualTrainerDisplays.map((vt) => (
+            <span key={vt.id} className="inline-flex items-center gap-1 text-xs text-indigo-700 dark:text-indigo-400">
+              {vt.avatar_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={vt.avatar_url} alt={vt.name} className="w-4 h-4 rounded-full object-cover shrink-0" />
+              ) : (
+                <span className="w-4 h-4 rounded-full bg-indigo-500/15 border border-indigo-500/30 flex items-center justify-center text-[8px] font-bold shrink-0 text-indigo-700 dark:text-indigo-400">
+                  {vt.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
+                </span>
+              )}
+              {vt.name}
             </span>
           ))}
           {(session.guest_trainers ?? []).map((name) => (
