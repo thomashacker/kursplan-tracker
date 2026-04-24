@@ -314,7 +314,7 @@ function DayTimetable({
       ) : (
         <div className="rounded-xl border border-border overflow-hidden">
           {/* Horizontal scroll wrapper — lets sessions breathe on narrow screens */}
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto overflow-y-clip">
           {(() => {
             const maxLanes = Math.max(...Array.from(layout.values()).map(v => v.totalLanes), 1);
             const MIN_LANE_PX = 160;
