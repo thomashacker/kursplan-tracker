@@ -108,20 +108,20 @@ function SessionRow({ s }: { s: PublicSession }) {
             <span className="text-xs text-muted-foreground">Training</span>
           )}
         </div>
-        {!cancelled && (
-          <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        {(s.location || s.trainers.length > 0) && (
+          <div className={`flex flex-wrap gap-x-3 gap-y-1 text-xs ${cancelled ? "text-muted-foreground/50 line-through" : "text-muted-foreground"}`}>
             {s.location && (
               <span className="flex items-center gap-0.5">
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
                   <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
                 </svg>
-                {s.location.mapsUrl
+                {!cancelled && s.location.mapsUrl
                   ? <a href={s.location.mapsUrl} target="_blank" rel="noopener noreferrer" className="hover:underline">{s.location.name}</a>
                   : s.location.name}
               </span>
             )}
             {s.trainers.length > 0 && (
-              <span className="flex flex-wrap items-center gap-1.5">
+              <span className={`flex flex-wrap items-center gap-1.5 ${cancelled ? "opacity-50" : ""}`}>
                 {s.trainers.map((t) => (
                   <span key={t.name} className="inline-flex items-center gap-1">
                     {t.avatarUrl ? (
@@ -139,8 +139,8 @@ function SessionRow({ s }: { s: PublicSession }) {
             )}
           </div>
         )}
-        {!cancelled && s.description && (
-          <p className="text-xs text-muted-foreground mt-1.5 italic leading-relaxed">{s.description}</p>
+        {s.description && (
+          <p className={`text-xs mt-1.5 italic leading-relaxed ${cancelled ? "text-muted-foreground/40 line-through" : "text-muted-foreground"}`}>{s.description}</p>
         )}
       </div>
       </div>
