@@ -71,16 +71,40 @@ function getOverlapLayout(
   daySessions: TrainingSession[]
 ): Map<string, { lane: number; totalLanes: number }> {
   const result = new Map<string, { lane: number; totalLanes: number }>();
-  const sorted = [...daySessions].sort((a, b) => a.time_start.localeCompare(b.time_start));
+  if (daySessions.length === 0) return result;
+
+  // Greedy column packing — assign each session to the first column
+  // whose last occupant has already ended, minimising wasted width.
+  const sorted = [...daySessions].sort(
+    (a, b) => a.time_start.localeCompare(b.time_start) || a.time_end.localeCompare(b.time_end)
+  );
+  const cols: TrainingSession[][] = [];
+  const sessionCol = new Map<string, number>();
+
   for (const s of sorted) {
-    const overlapping = sorted.filter(
-      (o) => o.time_start < s.time_end && o.time_end > s.time_start
-    );
-    result.set(s.id, {
-      lane: overlapping.findIndex((o) => o.id === s.id),
-      totalLanes: overlapping.length,
-    });
+    let placed = false;
+    for (let c = 0; c < cols.length; c++) {
+      const last = cols[c][cols[c].length - 1];
+      if (last.time_end <= s.time_start) {
+        cols[c].push(s);
+        sessionCol.set(s.id, c);
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) {
+      cols.push([s]);
+      sessionCol.set(s.id, cols.length - 1);
+    }
   }
+
+  // totalLanes for each session = widest overlap clique it participates in
+  for (const s of sorted) {
+    const overlapping = sorted.filter(o => o.time_start < s.time_end && o.time_end > s.time_start);
+    const totalLanes = Math.max(...overlapping.map(o => (sessionCol.get(o.id) ?? 0))) + 1;
+    result.set(s.id, { lane: sessionCol.get(s.id) ?? 0, totalLanes });
+  }
+
   return result;
 }
 
@@ -335,22 +359,34 @@ function DayTimetable({
                 const colorCfg = SESSION_COLORS[colorKey] ?? SESSION_COLORS.neutral;
                 const hasColor = colorKey !== "neutral" && !s.is_cancelled;
 
+                const isOverlapping = info.totalLanes > 1;
+
                 return (
                   <div
                     key={s.id}
-                    className={`absolute rounded-xl border overflow-hidden group px-3 py-2 ${
+                    className={`absolute overflow-hidden group ${
+                      isOverlapping ? "rounded-lg" : "rounded-xl"
+                    } border ${
                       s.is_cancelled
                         ? "bg-destructive/8 border-destructive/30"
-                        : hasColor ? "" : "bg-primary/10 border-primary/25"
-                    }`}
+                        : hasColor ? "" : "bg-card border-primary/20"
+                    } ${isOverlapping && !hasColor && !s.is_cancelled ? "shadow-sm" : ""}`}
                     style={{
                       top,
                       height,
-                      width:  `calc(${pct}% - 8px)`,
-                      left:   `calc(${info.lane * pct}% + 4px)`,
+                      width:  `calc(${pct}% - ${isOverlapping ? 6 : 8}px)`,
+                      left:   `calc(${info.lane * pct}% + ${isOverlapping ? 3 : 4}px)`,
                       ...(hasColor ? { backgroundColor: colorCfg.bg, borderColor: colorCfg.border } : {}),
                     }}
                   >
+                    {/* Left accent stripe for overlapping sessions */}
+                    {isOverlapping && !s.is_cancelled && (
+                      <div
+                        className="absolute left-0 top-0 bottom-0 w-1 rounded-l-lg"
+                        style={{ backgroundColor: hasColor ? colorCfg.border : "var(--primary)", opacity: 0.7 }}
+                      />
+                    )}
+                    <div className={`h-full px-3 py-2 ${isOverlapping ? "pl-3.5" : ""}`}>
                     {s.is_cancelled && (
                       <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-destructive mb-1">
                         <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
@@ -438,6 +474,7 @@ function DayTimetable({
                         </button>
                       </div>
                     )}
+                    </div>{/* end inner content div */}
                   </div>
                 );
               })}
@@ -606,13 +643,16 @@ export function WeeklyPlanEditor({
   const [publishModalOpen, setPublishModalOpen] = useState(false);
 
   useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect */
     setWeek(initialWeek);
     setHasChanges(false);
     setHasRemoteChanges(false);
+    /* eslint-enable react-hooks/set-state-in-effect */
     suppressRealtimeRef.current = false;
   }, [initialWeek]);
 
   // When week changes (URL nav), reset day drill-down
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setSelectedDay(null); }, [weekStart]);
 
   // Realtime: watch for changes made by other users on the same week

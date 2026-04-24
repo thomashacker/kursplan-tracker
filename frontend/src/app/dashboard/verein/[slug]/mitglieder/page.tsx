@@ -8,12 +8,6 @@ import { createClient } from "@/lib/supabase/client";
 import type { Club, ClubMembership, Invitation, Role, VirtualTrainer } from "@/types";
 import { ROLE_LABELS } from "@/types";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-} from "@/components/ui/select";
-import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -137,6 +131,7 @@ export default function MitgliederPage() {
     setMemberships(merged);
   }
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load(); }, [params.slug]);
 
   // ── invite ────────────────────────────────────────────────
@@ -321,6 +316,19 @@ export default function MitgliederPage() {
       </div>
 
       {/* ── Members list ────────────────────────────────────── */}
+      <div className="flex items-center gap-1.5 mb-3">
+        <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+          Registrierte Mitglieder
+        </p>
+        <div className="relative group/tip">
+          <svg className="text-muted-foreground/50 hover:text-muted-foreground cursor-default transition-colors" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
+          </svg>
+          <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 z-30 hidden group-hover/tip:block w-64 p-3 rounded-xl border border-border bg-popover shadow-lg text-xs text-muted-foreground leading-relaxed pointer-events-none">
+            Personen mit einem <span className="font-semibold text-foreground">aktiven Konto</span> in diesem Verein. Admins können Rollen ändern und Mitglieder entfernen. Neue Mitglieder werden über die Einladungsfunktion hinzugefügt.
+          </div>
+        </div>
+      </div>
       <div className="space-y-2 mb-8">
         {memberships.length === 0 && (
           <div className="rounded-2xl border border-dashed border-border bg-card py-12 text-center">
@@ -728,7 +736,7 @@ export default function MitgliederPage() {
                 id="trainer-notes"
                 value={trainerNotes}
                 onChange={(e) => setTrainerNotes(e.target.value)}
-                placeholder="z.B. Kampfsport, Kinder-Training…"
+                placeholder="z.B. Kinder-Training, Fortgeschrittene…"
                 className="h-10 rounded-xl text-sm"
               />
             </div>
