@@ -67,10 +67,10 @@ export function SessionCard({ session, trainers, canEdit, isToday, onEdit, onDel
         {formatTime(session.time_start)} – {formatTime(session.time_end)}
       </div>
 
-      {/* Type chips */}
-      {types.length > 0 && (
+      {/* Topic chips — prominent */}
+      {topics.length > 0 && (
         <div className="flex flex-wrap gap-1 mb-1.5">
-          {types.map((t) => (
+          {topics.map((t) => (
             <span key={t} className="inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-primary/10 text-primary border-primary/20">
               {t}
             </span>
@@ -78,10 +78,10 @@ export function SessionCard({ session, trainers, canEdit, isToday, onEdit, onDel
         </div>
       )}
 
-      {/* Topic chips */}
-      {topics.length > 0 && (
+      {/* Type chips — subtle */}
+      {types.length > 0 && (
         <div className="flex flex-wrap gap-1 mb-1.5">
-          {topics.map((t) => (
+          {types.map((t) => (
             <span key={t} className="inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full bg-secondary text-secondary-foreground">
               {t}
             </span>

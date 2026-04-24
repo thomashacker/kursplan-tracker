@@ -356,16 +356,16 @@ function DayTimetable({
                       {formatTime(s.time_start)} – {formatTime(s.time_end)}
                     </p>
 
-                    {types.length > 0 && (
+                    {topics.length > 0 && (
                       <div className="flex flex-wrap gap-1 mb-1">
-                        {types.map((t) => (
+                        {topics.map((t) => (
                           <span key={t} className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-primary/15 text-primary border border-primary/20">{t}</span>
                         ))}
                       </div>
                     )}
-                    {topics.length > 0 && (
+                    {types.length > 0 && (
                       <div className="flex flex-wrap gap-1 mb-1">
-                        {topics.map((t) => (
+                        {types.map((t) => (
                           <span key={t} className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-secondary text-secondary-foreground">{t}</span>
                         ))}
                       </div>

@@ -96,10 +96,10 @@ function SessionRow({ s }: { s: PublicSession }) {
           {cancelled && (
             <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-destructive/10 text-destructive border border-destructive/20 uppercase tracking-wide">Abgesagt</span>
           )}
-          {s.sessionTypes.map((t) => (
+          {s.topics.map((t) => (
             <span key={t} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${cancelled ? "bg-muted/40 text-muted-foreground/50 border-border/50 line-through" : "bg-primary/10 text-primary border-primary/20"}`}>{t}</span>
           ))}
-          {s.topics.map((t) => (
+          {s.sessionTypes.map((t) => (
             <span key={t} className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${cancelled ? "bg-muted/40 text-muted-foreground/50 line-through" : "bg-secondary text-secondary-foreground"}`}>{t}</span>
           ))}
           {!cancelled && s.sessionTypes.length === 0 && s.topics.length === 0 && (
