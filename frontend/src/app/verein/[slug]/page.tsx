@@ -127,13 +127,7 @@ export default async function PublicPlanPage({
       const virtualTrainers = virtualTrainerIds
         .map((id) => virtualProfileMap[id])
         .filter((p): p is { name: string; avatarUrl: string | null } => Boolean(p));
-      const guestTrainers: { name: string; avatarUrl: null; isGuest: true }[] =
-        (session.guest_trainers ?? []).map((name: string) => ({ name, avatarUrl: null, isGuest: true as const }));
-      const trainers = [
-        ...registeredTrainers.map((p) => ({ ...p, isGuest: false as const })),
-        ...virtualTrainers.map((p) => ({ ...p, isGuest: false as const })),
-        ...guestTrainers,
-      ];
+      const trainers = [...registeredTrainers, ...virtualTrainers];
       const trainerNames = trainers.map((t) => t.name);
 
       sessions.push({

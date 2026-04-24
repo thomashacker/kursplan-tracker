@@ -328,8 +328,6 @@ function DayTimetable({
                   .filter((st) => st.virtual_trainer_id)
                   .map((st) => virtualTrainers.find((vt) => vt.id === st.virtual_trainer_id))
                   .filter((vt): vt is VirtualTrainer => Boolean(vt));
-                const guestTrainers = s.guest_trainers ?? [];
-
                 const types  = s.session_types ?? [];
                 const topics = s.topics ?? [];
 
@@ -378,7 +376,7 @@ function DayTimetable({
                       </div>
                     )}
 
-                    {height >= 80 && (trainerProfiles.length > 0 || virtualTrainerDisplays.length > 0 || guestTrainers.length > 0) && (
+                    {height >= 80 && (trainerProfiles.length > 0 || virtualTrainerDisplays.length > 0) && (
                       <div className="flex flex-wrap items-center gap-1 mt-0.5">
                         {trainerProfiles.map((t) => (
                           <span key={t.id} className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
@@ -404,14 +402,6 @@ function DayTimetable({
                               </span>
                             )}
                             {vt.name}
-                          </span>
-                        ))}
-                        {guestTrainers.map((name) => (
-                          <span key={name} className="inline-flex items-center gap-1 text-[11px] text-amber-700 dark:text-amber-400">
-                            <span className="w-3.5 h-3.5 rounded-full bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-[7px] font-bold shrink-0">
-                              {name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
-                            </span>
-                            {name}
                           </span>
                         ))}
                       </div>
@@ -859,7 +849,7 @@ export function WeeklyPlanEditor({
     suppressRealtimeRef.current = true;
     const supabase = createClient();
     const { trainer_ids, virtual_trainer_ids, is_recurring, edit_scope, auto_extend, ...sessionData } = data;
-    const sessionFields = { ...sessionData, trainer_id: trainer_ids[0] ?? null, guest_trainers: data.guest_trainers };
+    const sessionFields = { ...sessionData, trainer_id: trainer_ids[0] ?? null };
 
     // ── Case 1: New one-off session ───────────────────────────
     if (editingSession === "new" && !is_recurring) {
@@ -894,7 +884,6 @@ export function WeeklyPlanEditor({
           default_trainer_id: trainer_ids[0] ?? null,
           trainer_ids,
           virtual_trainer_ids,
-          guest_trainers: data.guest_trainers,
           is_cancelled: data.is_cancelled,
           color: data.color,
           generated_through: generatedThrough,
@@ -942,10 +931,9 @@ export function WeeklyPlanEditor({
         description: data.description,
         default_trainer_id: trainer_ids[0] ?? null,
         trainer_ids,
-        guest_trainers: data.guest_trainers,
+        virtual_trainer_ids,
         is_cancelled: data.is_cancelled,
         color: data.color,
-        virtual_trainer_ids,
         auto_extend,
       }).eq("id", templateId);
 

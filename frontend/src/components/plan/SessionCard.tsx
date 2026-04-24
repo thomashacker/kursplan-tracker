@@ -101,7 +101,7 @@ export function SessionCard({ session, trainers, virtualTrainers, canEdit, isTod
       )}
 
       {/* Trainers, virtual trainers + guests */}
-      {(trainerProfiles.length > 0 || virtualTrainerDisplays.length > 0 || (session.guest_trainers?.length ?? 0) > 0) && (
+      {(trainerProfiles.length > 0 || virtualTrainerDisplays.length > 0) && (
         <div className="flex flex-wrap items-center gap-1.5 mt-1">
           {trainerProfiles.map((t) => (
             <span key={t.id} className="inline-flex items-center gap-1 text-xs text-muted-foreground">
@@ -127,14 +127,6 @@ export function SessionCard({ session, trainers, virtualTrainers, canEdit, isTod
                 </span>
               )}
               {vt.name}
-            </span>
-          ))}
-          {(session.guest_trainers ?? []).map((name) => (
-            <span key={name} className="inline-flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400">
-              <span className="w-4 h-4 rounded-full bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-[8px] font-bold shrink-0">
-                {name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
-              </span>
-              {name}
             </span>
           ))}
         </div>

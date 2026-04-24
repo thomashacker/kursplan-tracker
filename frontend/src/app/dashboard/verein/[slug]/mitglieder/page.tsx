@@ -420,14 +420,14 @@ export default function MitgliederPage() {
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-1.5">
               <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                Feste Trainer
+                Trainer
               </p>
               <div className="relative group/tip">
                 <svg className="text-muted-foreground/50 hover:text-muted-foreground cursor-default transition-colors" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
                 </svg>
                 <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 z-30 hidden group-hover/tip:block w-64 p-3 rounded-xl border border-border bg-popover shadow-lg text-xs text-muted-foreground leading-relaxed pointer-events-none">
-                  Feste Trainer müssen sich <span className="font-semibold text-foreground">nicht registrieren</span> — sie erscheinen einfach in der Trainerauswahl. Nützlich für externe Coaches oder Gasttrainer, die regelmäßig dabei sind. Admins können sie hier verwalten.
+                  Trainer hier müssen sich <span className="font-semibold text-foreground">nicht registrieren</span> — sie erscheinen einfach in der Trainerauswahl für Einheiten. Nützlich für externe Coaches, die regelmäßig dabei sind. Admins können sie hier verwalten.
                 </div>
               </div>
             </div>
@@ -447,7 +447,7 @@ export default function MitgliederPage() {
 
           {virtualTrainers.length === 0 ? (
             <div className="rounded-xl border border-dashed border-border bg-card py-8 text-center">
-              <p className="text-sm text-muted-foreground">Noch keine festen Trainer.</p>
+              <p className="text-sm text-muted-foreground">Noch keine Trainer.</p>
               {isAdmin && (
                 <button type="button" onClick={openAddTrainer} className="mt-2 text-xs text-primary hover:underline">
                   Ersten Trainer hinzufügen

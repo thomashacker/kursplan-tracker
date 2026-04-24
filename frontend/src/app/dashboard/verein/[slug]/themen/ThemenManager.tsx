@@ -20,7 +20,7 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   );
 }
 
-// ── Chip list (topics & session types) ───────────────────────
+// ── Structured list (topics & session types) ─────────────────
 
 function ChipListSection({
   title,
@@ -45,12 +45,8 @@ function ChipListSection({
   const [list, setList] = useState(items);
   const [newName, setNewName] = useState("");
   const [saving, setSaving] = useState(false);
-
-  // Rename state
-  const [editingItem, setEditingItem] = useState<{ id: string; name: string } | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
-
-  // Delete confirm state
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
 
   async function add() {
@@ -78,145 +74,141 @@ function ChipListSection({
     const { error } = await supabase.from(tableName).delete().eq("id", deleteTarget.id);
     if (error) { toast.error(error.message); return; }
     setList((prev) => prev.filter((t) => t.id !== deleteTarget.id));
-    if (editingItem?.id === deleteTarget.id) setEditingItem(null);
+    if (editingId === deleteTarget.id) setEditingId(null);
     toast.success("Gelöscht.");
   }
 
   function startEdit(item: { id: string; name: string }) {
-    setEditingItem(item);
+    setEditingId(item.id);
     setEditName(item.name);
   }
 
   async function saveRename() {
-    if (!editingItem) return;
+    if (!editingId) return;
     const name = editName.trim();
-    if (!name || name === editingItem.name) { setEditingItem(null); return; }
+    const original = list.find((t) => t.id === editingId);
+    if (!name || name === original?.name) { setEditingId(null); return; }
     const supabase = createClient();
-    const { error } = await supabase.from(tableName).update({ name }).eq("id", editingItem.id);
+    const { error } = await supabase.from(tableName).update({ name }).eq("id", editingId);
     if (error) { toast.error(error.message); return; }
     setList((prev) =>
-      prev.map((t) => t.id === editingItem.id ? { ...t, name } : t)
+      prev.map((t) => t.id === editingId ? { ...t, name } : t)
         .sort((a, b) => a.name.localeCompare(b.name))
     );
-    setEditingItem(null);
-    toast.success("Umbenannt. Bestehende Trainingseinheiten zeigen noch den alten Namen.");
+    setEditingId(null);
+    toast.success("Umbenannt.");
   }
 
   return (
     <section className="py-7">
       <SectionTitle>{title}</SectionTitle>
-      <p className="text-sm text-muted-foreground mb-5">{description}</p>
+      <p className="text-sm text-muted-foreground mb-4">{description}</p>
 
-      <div className="flex flex-wrap gap-2 mb-5 min-h-[2rem]">
-        <AnimatePresence>
-          {list.map((t) => (
-            <motion.span
-              key={t.id}
-              initial={reduced ? false : { opacity: 0, scale: 0.85 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.85 }}
-              transition={spring}
-              className="inline-flex items-center gap-1 text-sm pl-3 pr-1.5 py-1.5 rounded-full bg-secondary text-secondary-foreground group"
-            >
-              <span className="leading-none">{t.name}</span>
-
-              {/* Rename button */}
-              <button
-                type="button"
-                onClick={() => startEdit(t)}
-                className="w-5 h-5 flex items-center justify-center rounded-full hover:bg-muted-foreground/15 text-muted-foreground/50 hover:text-muted-foreground transition-colors"
-                aria-label={`${t.name} umbenennen`}
+      {/* Scrollable list */}
+      <div className="rounded-xl border border-border overflow-hidden mb-3">
+        <div className="divide-y divide-border max-h-60 overflow-y-auto">
+          <AnimatePresence initial={false}>
+            {list.map((t) => (
+              <motion.div
+                key={t.id}
+                initial={reduced ? false : { opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.15 }}
+                className="overflow-hidden"
               >
-                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                </svg>
-              </button>
+                {editingId === t.id ? (
+                  /* ── Inline edit row ── */
+                  <div className="flex items-center gap-2 px-3 py-2 bg-primary/5">
+                    <Input
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") { e.preventDefault(); saveRename(); }
+                        if (e.key === "Escape") setEditingId(null);
+                      }}
+                      autoFocus
+                      className="h-8 rounded-lg text-sm flex-1"
+                    />
+                    <button
+                      type="button"
+                      onClick={saveRename}
+                      disabled={!editName.trim()}
+                      className="h-8 px-3 rounded-lg bg-primary text-primary-foreground text-xs font-semibold disabled:opacity-40 hover:opacity-90 transition-opacity shrink-0"
+                    >
+                      Speichern
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingId(null)}
+                      className="h-8 px-2.5 rounded-lg border border-border text-xs hover:bg-secondary transition-colors shrink-0"
+                    >
+                      Abbrechen
+                    </button>
+                  </div>
+                ) : (
+                  /* ── Display row ── */
+                  <div className="flex items-center gap-2 px-3 py-2.5 group hover:bg-secondary/40 transition-colors">
+                    <span className="flex-1 text-sm">{t.name}</span>
+                    <div className="flex gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                      <button
+                        type="button"
+                        onClick={() => startEdit(t)}
+                        className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
+                        aria-label={`${t.name} umbenennen`}
+                      >
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDeleteTarget(t)}
+                        className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-destructive/10 hover:border-destructive/30 text-muted-foreground hover:text-destructive transition-colors"
+                        aria-label={`${t.name} löschen`}
+                      >
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="3 6 5 6 21 6"/>
+                          <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                          <path d="M10 11v6M14 11v6"/>
+                          <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </motion.div>
+            ))}
+          </AnimatePresence>
 
-              {/* Delete button */}
-              <button
-                type="button"
-                onClick={() => setDeleteTarget(t)}
-                className="w-5 h-5 flex items-center justify-center rounded-full hover:bg-destructive/15 text-muted-foreground/50 hover:text-destructive transition-colors"
-                aria-label={`${t.name} entfernen`}
-              >
-                <svg width="8" height="8" viewBox="0 0 10 10" fill="none">
-                  <path d="M2 2l6 6M8 2L2 8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-                </svg>
-              </button>
-            </motion.span>
-          ))}
-        </AnimatePresence>
-        {list.length === 0 && (
-          <p className="text-sm text-muted-foreground/50">{emptyText}</p>
-        )}
-      </div>
+          {list.length === 0 && (
+            <div className="px-3 py-6 text-center">
+              <p className="text-sm text-muted-foreground/50">{emptyText}</p>
+            </div>
+          )}
+        </div>
 
-      {/* Inline rename row */}
-      <AnimatePresence>
-        {editingItem && (
-          <motion.div
-            key="rename"
-            initial={reduced ? false : { opacity: 0, y: -4 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4 }}
-            transition={{ duration: 0.15 }}
-            className="flex gap-2 mb-3 p-3 rounded-xl border border-primary/25 bg-primary/5"
+        {/* Add row — pinned at bottom of the box */}
+        <div className="flex gap-2 p-2 border-t border-border bg-secondary/20">
+          <Input
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
+            placeholder={placeholder}
+            className="h-8 rounded-lg text-sm"
+          />
+          <button
+            type="button"
+            onClick={add}
+            disabled={saving || !newName.trim()}
+            className="h-8 px-3 rounded-lg bg-primary text-primary-foreground text-xs font-semibold disabled:opacity-40 hover:opacity-90 transition-opacity shrink-0"
           >
-            <div className="flex-1 space-y-1">
-              <p className="text-xs text-muted-foreground font-medium">„{editingItem.name}" umbenennen</p>
-              <Input
-                value={editName}
-                onChange={(e) => setEditName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") { e.preventDefault(); saveRename(); }
-                  if (e.key === "Escape") setEditingItem(null);
-                }}
-                autoFocus
-                className="h-8 rounded-lg text-sm"
-              />
-            </div>
-            <div className="flex flex-col gap-1 justify-end">
-              <button
-                type="button"
-                onClick={saveRename}
-                disabled={!editName.trim()}
-                className="h-8 px-3 rounded-lg bg-primary text-primary-foreground text-xs font-semibold disabled:opacity-40 hover:opacity-90 transition-opacity"
-              >
-                Speichern
-              </button>
-              <button
-                type="button"
-                onClick={() => setEditingItem(null)}
-                className="h-8 px-3 rounded-lg border border-border text-xs hover:bg-secondary transition-colors"
-              >
-                Abbrechen
-              </button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Add new */}
-      <div className="flex gap-2">
-        <Input
-          value={newName}
-          onChange={(e) => setNewName(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
-          placeholder={placeholder}
-          className="h-10 rounded-xl text-sm"
-        />
-        <button
-          type="button"
-          onClick={add}
-          disabled={saving || !newName.trim()}
-          className="h-10 px-4 rounded-xl bg-primary text-primary-foreground text-sm font-semibold disabled:opacity-40 hover:opacity-90 transition-opacity shrink-0"
-        >
-          Hinzufügen
-        </button>
+            Hinzufügen
+          </button>
+        </div>
       </div>
 
-      {/* Delete confirm dialog */}
       <ConfirmDialog
         open={deleteTarget !== null}
         title={`„${deleteTarget?.name}" löschen?`}

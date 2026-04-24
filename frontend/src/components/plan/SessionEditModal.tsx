@@ -29,7 +29,7 @@ export interface SessionSaveData {
   description: string | null;
   location_id: string | null;
   trainer_ids: string[];
-  guest_trainers: string[];
+  virtual_trainer_ids: string[];
   is_cancelled: boolean;
   /** Only for new sessions: whether to generate recurring occurrences */
   is_recurring: boolean;
@@ -38,7 +38,6 @@ export interface SessionSaveData {
   /** Whether the cron job should keep extending this template automatically */
   auto_extend: boolean;
   color: SessionColor | null;
-  virtual_trainer_ids: string[];
 }
 
 interface Props {
@@ -163,43 +162,68 @@ function MultiTagSelect({
   );
 }
 
-// ── Guest trainer free-text input ────────────────────────────
+// ── Unified trainer picker (registered + virtual, flat list) ─
 
-function GuestTrainerInput({
-  value,
-  onChange,
+function UnifiedTrainerSelect({
+  trainers,
+  virtualTrainers,
+  selected,
+  onAdd,
+  onRemove,
 }: {
-  value: string[];
-  onChange: (v: string[]) => void;
+  trainers: Profile[];
+  virtualTrainers: VirtualTrainer[];
+  selected: string[];
+  onAdd: (id: string) => void;
+  onRemove: (id: string) => void;
 }) {
-  const [input, setInput] = useState("");
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const vtIds = new Set(virtualTrainers.map((vt) => vt.id));
 
-  function add() {
-    const name = input.trim();
-    if (!name || value.includes(name)) { setInput(""); return; }
-    onChange([...value, name]);
-    setInput("");
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Combined sorted options
+  const allOptions = [
+    ...trainers.map((t) => ({ id: t.id, label: t.full_name, isVirtual: false })),
+    ...virtualTrainers.map((vt) => ({ id: vt.id, label: vt.name, isVirtual: true })),
+  ].sort((a, b) => a.label.localeCompare(b.label));
+
+  const available = allOptions.filter((o) => !selected.includes(o.id));
+
+  function labelFor(id: string) {
+    return allOptions.find((o) => o.id === id)?.label ?? id;
   }
 
   return (
     <div className="space-y-1.5">
       <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-        Gasttrainer
+        Trainer
       </Label>
 
-      {value.length > 0 && (
+      {selected.length > 0 && (
         <div className="flex flex-wrap gap-1.5 mb-1">
-          {value.map((name) => (
+          {selected.map((id) => (
             <span
-              key={name}
-              className="inline-flex items-center gap-1 h-6 pl-2.5 pr-1.5 rounded-full text-xs font-medium bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/25"
+              key={id}
+              className={`inline-flex items-center gap-1 h-6 pl-2.5 pr-1.5 rounded-full text-xs font-medium border ${
+                vtIds.has(id)
+                  ? "bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 border-indigo-500/20"
+                  : "bg-primary/10 text-primary border-primary/20"
+              }`}
             >
-              {name}
+              {labelFor(id)}
               <button
                 type="button"
-                onClick={() => onChange(value.filter((n) => n !== name))}
-                className="flex items-center justify-center w-3.5 h-3.5 rounded-full hover:bg-amber-500/20 transition-colors"
-                aria-label={`${name} entfernen`}
+                onClick={() => onRemove(id)}
+                className="flex items-center justify-center w-3.5 h-3.5 rounded-full hover:bg-black/10 transition-colors"
+                aria-label={`${labelFor(id)} entfernen`}
               >
                 <svg width="7" height="7" viewBox="0 0 8 8" fill="none">
                   <path d="M1 1l6 6M7 1L1 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
@@ -210,24 +234,42 @@ function GuestTrainerInput({
         </div>
       )}
 
-      <div className="flex gap-2">
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
-          placeholder="Name eingeben, Enter zum Hinzufügen…"
-          className="flex-1 h-9 px-3 rounded-xl border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-        />
-        <button
-          type="button"
-          onClick={add}
-          disabled={!input.trim()}
-          className="h-9 px-3 rounded-xl border border-border text-sm font-medium hover:bg-secondary transition-colors disabled:opacity-40"
-        >
-          +
-        </button>
-      </div>
+      {allOptions.length === 0 ? (
+        <p className="text-xs text-muted-foreground">Keine Trainer im Verein.</p>
+      ) : (
+        <div ref={ref} className="relative">
+          <button
+            type="button"
+            onClick={() => setOpen((o) => !o)}
+            className="w-full h-9 px-3 rounded-xl border border-input bg-background text-sm text-left flex items-center justify-between hover:border-ring transition-colors"
+          >
+            <span className="text-muted-foreground">
+              {available.length === 0 ? "Alle ausgewählt" : "Trainer hinzufügen…"}
+            </span>
+            <svg
+              width="12" height="12" viewBox="0 0 12 12" fill="none"
+              className={`shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
+            >
+              <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+
+          {open && available.length > 0 && (
+            <div className="absolute z-50 mt-1 w-full rounded-xl border border-border bg-popover shadow-md overflow-hidden">
+              {available.map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => { onAdd(opt.id); setOpen(false); }}
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-secondary transition-colors"
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -336,9 +378,7 @@ export function SessionEditModal({
     ?.filter((st) => st.virtual_trainer_id)
     .map((st) => st.virtual_trainer_id!) ?? [];
 
-  const [selectedTrainerIds, setSelectedTrainerIds] = useState<string[]>(initTrainers);
-  const [selectedVirtualTrainerIds, setSelectedVirtualTrainerIds] = useState<string[]>(initVirtualTrainers);
-  const [guestTrainers, setGuestTrainers] = useState<string[]>(session?.guest_trainers ?? []);
+  const [selectedAllTrainerIds, setSelectedAllTrainerIds] = useState<string[]>([...initTrainers, ...initVirtualTrainers]);
   const [selectedTopics, setSelectedTopics] = useState<string[]>(session?.topics ?? []);
   const [selectedTypes, setSelectedTypes] = useState<string[]>(session?.session_types ?? []);
   const [isCancelled, setIsCancelled] = useState<boolean>(session?.is_cancelled ?? false);
@@ -365,6 +405,7 @@ export function SessionEditModal({
     e.preventDefault();
     const form = new FormData(e.currentTarget);
 
+    const vtIdSet = new Set(virtualTrainers.map((vt) => vt.id));
     const data: SessionSaveData = {
       day_of_week: dayOfWeek,
       time_start: form.get("time_start") as string,
@@ -373,9 +414,8 @@ export function SessionEditModal({
       session_types: selectedTypes,
       description: ((form.get("description") as string) ?? "").trim() || null,
       location_id: locationId === "none" ? null : locationId,
-      trainer_ids: selectedTrainerIds,
-      virtual_trainer_ids: selectedVirtualTrainerIds,
-      guest_trainers: guestTrainers,
+      trainer_ids: selectedAllTrainerIds.filter((id) => !vtIdSet.has(id)),
+      virtual_trainer_ids: selectedAllTrainerIds.filter((id) => vtIdSet.has(id)),
       is_cancelled: isCancelled,
       is_recurring: isNew ? makeRecurring : false,
       edit_scope: editScope,
@@ -524,31 +564,14 @@ export function SessionEditModal({
             </Select>
           </div>
 
-          {/* Trainer */}
-          <MultiTagSelect
-            label="Trainer"
-            options={trainers.map((t) => ({ id: t.id, label: t.full_name }))}
-            selected={selectedTrainerIds}
-            onAdd={(id) => add(setSelectedTrainerIds, id)}
-            onRemove={(id) => remove(setSelectedTrainerIds, id)}
-            placeholder="Trainer hinzufügen…"
-            emptyText="Keine Trainer oder Admins im Verein."
+          {/* Unified trainer picker */}
+          <UnifiedTrainerSelect
+            trainers={trainers}
+            virtualTrainers={virtualTrainers}
+            selected={selectedAllTrainerIds}
+            onAdd={(id) => setSelectedAllTrainerIds((prev) => prev.includes(id) ? prev : [...prev, id])}
+            onRemove={(id) => setSelectedAllTrainerIds((prev) => prev.filter((x) => x !== id))}
           />
-
-          {/* Virtual trainers (club-level, no login required) */}
-          {virtualTrainers.length > 0 && (
-            <MultiTagSelect
-              label="Feste Trainer"
-              options={virtualTrainers.map((vt) => ({ id: vt.id, label: vt.name }))}
-              selected={selectedVirtualTrainerIds}
-              onAdd={(id) => add(setSelectedVirtualTrainerIds, id)}
-              onRemove={(id) => remove(setSelectedVirtualTrainerIds, id)}
-              placeholder="Festen Trainer hinzufügen…"
-            />
-          )}
-
-          {/* Guest trainers */}
-          <GuestTrainerInput value={guestTrainers} onChange={setGuestTrainers} />
 
           {/* Description */}
           <div className="space-y-1.5">

@@ -10,7 +10,6 @@ import { SESSION_COLORS } from "@/types";
 export type TrainerInfo = {
   name: string;
   avatarUrl: string | null;
-  isGuest: boolean;
 };
 
 export type PublicSession = {
@@ -124,16 +123,12 @@ function SessionRow({ s }: { s: PublicSession }) {
             {s.trainers.length > 0 && (
               <span className="flex flex-wrap items-center gap-1.5">
                 {s.trainers.map((t) => (
-                  <span key={t.name} className={`inline-flex items-center gap-1 ${t.isGuest ? "text-amber-700 dark:text-amber-400" : ""}`}>
+                  <span key={t.name} className="inline-flex items-center gap-1">
                     {t.avatarUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={t.avatarUrl} alt={t.name} className="w-4 h-4 rounded-full object-cover shrink-0" />
                     ) : (
-                      <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold shrink-0 ${
-                        t.isGuest
-                          ? "bg-amber-500/15 border border-amber-500/30 text-amber-700 dark:text-amber-400"
-                          : "bg-primary/15 text-primary"
-                      }`}>
+                      <span className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold shrink-0 bg-primary/15 text-primary">
                         {t.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
                       </span>
                     )}
@@ -518,14 +513,12 @@ export default function PublicPlanClient({
                         {s.trainers.length > 0 && (
                           <span className="flex flex-wrap items-center gap-1.5">
                             {s.trainers.map((t) => (
-                              <span key={t.name} className={`inline-flex items-center gap-1 ${t.isGuest ? "text-amber-700 dark:text-amber-400" : ""}`}>
+                              <span key={t.name} className="inline-flex items-center gap-1">
                                 {t.avatarUrl ? (
                                   // eslint-disable-next-line @next/next/no-img-element
                                   <img src={t.avatarUrl} alt={t.name} className="w-4 h-4 rounded-full object-cover shrink-0" />
                                 ) : (
-                                  <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold shrink-0 ${
-                                    t.isGuest ? "bg-amber-500/15 border border-amber-500/30 text-amber-700 dark:text-amber-400" : "bg-primary/15 text-primary"
-                                  }`}>
+                                  <span className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold shrink-0 bg-primary/15 text-primary">
                                     {t.name.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase()}
                                   </span>
                                 )}
