@@ -126,6 +126,7 @@ export default async function PublicPlanPage({
           : null,
         trainerNames,
         trainers,
+        color: session.color ?? null,
       });
     }
   }

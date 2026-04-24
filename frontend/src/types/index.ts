@@ -104,6 +104,7 @@ export interface TrainingSession {
   guest_trainers: string[]; // free-text names for guest / external trainers
   tags: string[];
   notes: string | null;
+  color: string | null;
   created_at: string;
   updated_at: string;
   locations?: Location;
@@ -129,7 +130,19 @@ export interface SessionTemplate {
   guest_trainers: string[];
   tags: string[];
   is_cancelled: boolean;
+  color: string | null;
 }
+
+export type SessionColor = "neutral" | "blue" | "yellow" | "green" | "orange" | "pink";
+
+export const SESSION_COLORS: Record<SessionColor, { label: string; hex: string; bg: string; border: string }> = {
+  neutral: { label: "Standard", hex: "#94a3b8", bg: "",                          border: "" },
+  blue:    { label: "Blau",     hex: "#3b82f6", bg: "rgba(59,130,246,0.08)",     border: "rgba(59,130,246,0.35)" },
+  yellow:  { label: "Gelb",     hex: "#f59e0b", bg: "rgba(245,158,11,0.08)",     border: "rgba(245,158,11,0.40)" },
+  green:   { label: "Grün",     hex: "#22c55e", bg: "rgba(34,197,94,0.08)",      border: "rgba(34,197,94,0.35)" },
+  orange:  { label: "Orange",   hex: "#f97316", bg: "rgba(249,115,22,0.08)",     border: "rgba(249,115,22,0.35)" },
+  pink:    { label: "Pink",     hex: "#ec4899", bg: "rgba(236,72,153,0.08)",     border: "rgba(236,72,153,0.35)" },
+};
 
 export const DAY_NAMES = [
   "Montag",

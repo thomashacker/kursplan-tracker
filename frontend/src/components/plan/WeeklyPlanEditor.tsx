@@ -2,10 +2,11 @@
 
 import { useState, useTransition, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { toast } from "sonner";
 import { motion, useReducedMotion } from "framer-motion";
-import type { Club, TrainingWeek, TrainingSession, Location, Profile, ClubTopic, ClubSessionType } from "@/types";
-import { DAY_NAMES } from "@/types";
+import type { Club, TrainingWeek, TrainingSession, Location, Profile, ClubTopic, ClubSessionType, SessionColor } from "@/types";
+import { DAY_NAMES, SESSION_COLORS } from "@/types";
 import { formatTime, formatWeekRange, offsetWeek, getCurrentMonday, toISODate } from "@/lib/utils/date";
 import { createClient } from "@/lib/supabase/client";
 import { SessionCard } from "./SessionCard";
@@ -53,6 +54,12 @@ function isCurrentWeek(weekStart: string): boolean {
 function timeToMin(t: string): number {
   const [h, m] = t.split(":").map(Number);
   return h * 60 + m;
+}
+
+function weekDayDate(weekStart: string, dayIndex: number): string {
+  const d = new Date(weekStart + "T00:00:00");
+  d.setDate(d.getDate() + dayIndex);
+  return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
 function sessionLabel(s: TrainingSession): string {
@@ -212,6 +219,7 @@ function MonthView({
 
 function DayTimetable({
   dayIndex,
+  weekStart,
   sessions,
   trainers,
   canEdit,
@@ -221,6 +229,7 @@ function DayTimetable({
   onBack,
 }: {
   dayIndex: number;
+  weekStart: string;
   sessions: TrainingSession[];
   trainers: Profile[];
   canEdit: boolean;
@@ -254,8 +263,11 @@ function DayTimetable({
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M10 4L6 8l4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
           Zur Woche
         </button>
-        <h2 className="font-bold text-lg" style={{ fontFamily: "var(--font-syne, system-ui)" }}>
+        <h2 className="font-bold text-lg leading-tight" style={{ fontFamily: "var(--font-syne, system-ui)" }}>
           {DAY_NAMES[dayIndex]}
+          <span className="block text-xs font-mono font-normal text-muted-foreground tracking-normal">
+            {weekDayDate(weekStart, dayIndex)}
+          </span>
         </h2>
         {canEdit && (
           <button
@@ -314,19 +326,24 @@ function DayTimetable({
                 const types  = s.session_types ?? [];
                 const topics = s.topics ?? [];
 
+                const colorKey = (s.color ?? "neutral") as SessionColor;
+                const colorCfg = SESSION_COLORS[colorKey] ?? SESSION_COLORS.neutral;
+                const hasColor = colorKey !== "neutral" && !s.is_cancelled;
+
                 return (
                   <div
                     key={s.id}
                     className={`absolute rounded-xl border overflow-hidden group px-3 py-2 ${
                       s.is_cancelled
                         ? "bg-destructive/8 border-destructive/30"
-                        : "bg-primary/10 border-primary/25"
+                        : hasColor ? "" : "bg-primary/10 border-primary/25"
                     }`}
                     style={{
                       top,
                       height,
                       width:  `calc(${pct}% - 8px)`,
                       left:   `calc(${info.lane * pct}% + 4px)`,
+                      ...(hasColor ? { backgroundColor: colorCfg.bg, borderColor: colorCfg.border } : {}),
                     }}
                   >
                     {s.is_cancelled && (
@@ -635,22 +652,33 @@ export function WeeklyPlanEditor({
     return data.id;
   }
 
-  async function togglePublish(scope: "single" | "future" = "single") {
+  async function togglePublish(scope: "single" | "month" | "all" = "single") {
     if (!week) return;
     suppressRealtimeRef.current = true;
     const supabase = createClient();
     const newVal = !week.is_published;
 
-    if (scope === "future") {
-      // Publish or unpublish this week + all future weeks
+    if (scope === "month") {
+      const [y, m] = weekStart.split("-").map(Number);
+      const monthStart = `${weekStart.slice(0, 7)}-01`;
+      const monthEnd   = `${weekStart.slice(0, 7)}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
       const { error } = await supabase
         .from("training_weeks")
         .update({ is_published: newVal })
         .eq("club_id", club.id)
-        .gte("week_start", weekStart);
+        .gte("week_start", monthStart)
+        .lte("week_start", monthEnd);
       if (error) { toast.error(error.message); return; }
       setWeek({ ...week, is_published: newVal });
-      toast.success(newVal ? "Diese und alle zukünftigen Wochen veröffentlicht!" : "Diese und alle zukünftigen Wochen unveröffentlicht.");
+      toast.success(newVal ? `${MONTH_NAMES[m - 1]} veröffentlicht!` : `${MONTH_NAMES[m - 1]} unveröffentlicht.`);
+    } else if (scope === "all") {
+      const { error } = await supabase
+        .from("training_weeks")
+        .update({ is_published: newVal })
+        .eq("club_id", club.id);
+      if (error) { toast.error(error.message); return; }
+      setWeek({ ...week, is_published: newVal });
+      toast.success(newVal ? "Alle Wochen veröffentlicht!" : "Alle Wochen unveröffentlicht.");
     } else {
       const { error } = await supabase
         .from("training_weeks")
@@ -716,6 +744,7 @@ export function WeeklyPlanEditor({
       day_of_week: number; time_start: string; time_end: string;
       location_id: string | null; topics: string[]; session_types: string[];
       description: string | null; trainer_ids: string[]; is_cancelled: boolean;
+      color: string | null;
     },
     fromWeekStart: string,
     numWeeks: number,
@@ -763,6 +792,7 @@ export function WeeklyPlanEditor({
         description: data.description,
         trainer_id: data.trainer_ids[0] ?? null,
         is_cancelled: data.is_cancelled,
+        color: data.color,
         template_id: templateId,
         is_modified: false,
         tags: [],
@@ -823,6 +853,7 @@ export function WeeklyPlanEditor({
           trainer_ids,
           guest_trainers: data.guest_trainers,
           is_cancelled: data.is_cancelled,
+          color: data.color,
           generated_through: generatedThrough,
           auto_extend,
           tags: [],
@@ -870,6 +901,7 @@ export function WeeklyPlanEditor({
         trainer_ids,
         guest_trainers: data.guest_trainers,
         is_cancelled: data.is_cancelled,
+        color: data.color,
         auto_extend,
       }).eq("id", templateId);
 
@@ -1051,6 +1083,18 @@ export function WeeklyPlanEditor({
                   {week.is_published ? "Unveröffentlichen" : "Veröffentlichen"}
                 </button>
 
+                <Link
+                  href={`/verein/${club.slug}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-border text-xs font-medium text-muted-foreground hover:border-primary/40 hover:text-primary transition-colors"
+                >
+                  Öffentliche Ansicht
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+                  </svg>
+                </Link>
+
                 <Dialog open={publishModalOpen} onOpenChange={setPublishModalOpen}>
                   <DialogContent className="max-w-sm">
                     <DialogHeader>
@@ -1072,11 +1116,20 @@ export function WeeklyPlanEditor({
                         <p className="text-xs text-muted-foreground mt-0.5">{formatWeekRange(weekStart)}</p>
                       </button>
                       <button
-                        onClick={() => { setPublishModalOpen(false); togglePublish("future"); }}
+                        onClick={() => { setPublishModalOpen(false); togglePublish("month"); }}
                         className="w-full text-left px-4 py-3 rounded-xl border border-border hover:bg-secondary transition-colors"
                       >
-                        <p className="text-sm font-semibold">Diese & alle zukünftigen Wochen</p>
-                        <p className="text-xs text-muted-foreground mt-0.5">Ab {formatWeekRange(weekStart)}</p>
+                        <p className="text-sm font-semibold">Diesen Monat</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {MONTH_NAMES[Number(weekStart.split("-")[1]) - 1]} {weekStart.split("-")[0]}
+                        </p>
+                      </button>
+                      <button
+                        onClick={() => { setPublishModalOpen(false); togglePublish("all"); }}
+                        className="w-full text-left px-4 py-3 rounded-xl border border-border hover:bg-secondary transition-colors"
+                      >
+                        <p className="text-sm font-semibold">Alle Wochen</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">Gesamter Trainingsplan</p>
                       </button>
                     </div>
                     <button
@@ -1136,6 +1189,7 @@ export function WeeklyPlanEditor({
           {selectedDay !== null ? (
             <DayTimetable
               dayIndex={selectedDay}
+              weekStart={weekStart}
               sessions={sessions}
               trainers={trainers}
               canEdit={canEdit}
@@ -1155,15 +1209,33 @@ export function WeeklyPlanEditor({
                   return (
                     <motion.div key={dayIndex} initial={reduced ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ ...spring, delay: dayIndex * 0.03 }}>
                       <div className={`rounded-xl border overflow-hidden ${isToday ? "border-primary/30" : "border-border"}`}>
-                        <div className={`flex items-center justify-between px-3 py-2 ${isToday ? "bg-primary/8" : "bg-secondary/40"}`}>
+                        <div className={`flex items-center ${isToday ? "bg-primary/8" : "bg-secondary/40"}`}>
+                          {/* Full-width tappable row → drill-down */}
                           <button
                             onClick={() => setSelectedDay(dayIndex)}
-                            className={`text-xs font-semibold uppercase tracking-widest hover:text-primary transition-colors ${isToday ? "text-primary" : "text-muted-foreground"}`}
+                            className={`flex-1 flex items-center justify-between px-3 py-2.5 group/dayrow transition-colors hover:bg-black/5 active:bg-black/10`}
                           >
-                            {dayName}{isToday && <span className="ml-2 text-[10px] font-medium tracking-normal normal-case">Heute</span>}
+                            <span className={`flex items-baseline gap-2 text-xs font-semibold uppercase tracking-widest transition-colors ${isToday ? "text-primary" : "text-muted-foreground"} group-hover/dayrow:text-primary`}>
+                              {dayName}
+                              <span className="font-mono font-normal tracking-normal normal-case opacity-70 text-[10px]">
+                                {weekDayDate(weekStart, dayIndex)}
+                              </span>
+                              {isToday && <span className="text-[10px] font-medium tracking-normal normal-case">Heute</span>}
+                            </span>
+                            {/* Chevron — universal "tap to expand" signal */}
+                            <svg
+                              width="12" height="12" viewBox="0 0 16 16" fill="none"
+                              className={`shrink-0 transition-colors ${isToday ? "text-primary/50" : "text-muted-foreground/35"} group-hover/dayrow:text-primary/70`}
+                            >
+                              <path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                            </svg>
                           </button>
+                          {/* + Hinzufügen separated so it doesn't trigger drill-down */}
                           {canEdit && (
-                            <button onClick={() => openNewSession(dayIndex)} className="text-xs text-muted-foreground hover:text-primary transition-colors font-medium">
+                            <button
+                              onClick={() => openNewSession(dayIndex)}
+                              className="h-full px-3 border-l border-border/50 text-xs text-muted-foreground hover:text-primary hover:bg-primary/8 transition-colors font-medium shrink-0"
+                            >
                               + Hinzufügen
                             </button>
                           )}
@@ -1193,12 +1265,18 @@ export function WeeklyPlanEditor({
                       {/* Clickable day header → drill-down */}
                       <button
                         onClick={() => setSelectedDay(dayIndex)}
-                        className={`text-xs font-semibold text-center py-2 mb-2 rounded-lg uppercase tracking-widest w-full transition-colors hover:bg-primary/10 hover:text-primary ${
+                        className={`relative text-xs font-semibold text-center py-2 mb-2 rounded-lg uppercase tracking-widest w-full transition-all hover:bg-primary/10 hover:text-primary active:scale-95 group/daycol ${
                           isToday ? "bg-primary/10 text-primary" : "text-muted-foreground"
                         }`}
                       >
                         {dayName.slice(0,2)}
-                        {isToday && <span className="block text-[9px] font-medium tracking-normal normal-case -mt-0.5">Heute</span>}
+                        <span className="block text-[10px] font-mono font-normal tracking-normal normal-case opacity-60 -mt-0.5">
+                          {weekDayDate(weekStart, dayIndex)}
+                        </span>
+                        {isToday && <span className="block text-[9px] font-medium tracking-normal normal-case text-primary -mt-0.5">Heute</span>}
+                        <span className="block text-[9px] font-normal tracking-normal normal-case opacity-35 group-hover/daycol:opacity-70 transition-opacity mt-0.5">
+                          Tagesansicht
+                        </span>
                       </button>
                       <div className="flex-1 space-y-2">
                         {daySessions.map((session) => (

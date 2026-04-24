@@ -16,6 +16,7 @@ function makeSession(overrides: Partial<PublicSession> = {}): PublicSession {
     location: null,
     trainerNames: [],
     trainers: [],
+    color: null,
     ...overrides,
   };
 }

@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import type { TrainingSession, Location, Profile, ClubTopic, ClubSessionType } from "@/types";
-import { DAY_NAMES } from "@/types";
+import type { TrainingSession, Location, Profile, ClubTopic, ClubSessionType, SessionColor } from "@/types";
+import { DAY_NAMES, SESSION_COLORS } from "@/types";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -37,6 +37,7 @@ export interface SessionSaveData {
   edit_scope: "single" | "future";
   /** Whether the cron job should keep extending this template automatically */
   auto_extend: boolean;
+  color: SessionColor | null;
 }
 
 interface Props {
@@ -341,6 +342,10 @@ export function SessionEditModal({
   // Editing a recurring session — scope picker
   const [editScope, setEditScope] = useState<"single" | "future">("single");
 
+  // Color picker
+  const initColor = (session?.color ?? null) as SessionColor | null;
+  const [selectedColor, setSelectedColor] = useState<SessionColor | null>(initColor);
+
   function add<T extends string>(setter: React.Dispatch<React.SetStateAction<T[]>>, id: T) {
     setter((prev) => prev.includes(id) ? prev : [...prev, id]);
   }
@@ -366,6 +371,7 @@ export function SessionEditModal({
       is_recurring: isNew ? makeRecurring : false,
       edit_scope: editScope,
       auto_extend: autoExtend,
+      color: selectedColor,
     };
 
     // Require extra confirmation when overwriting all future recurring sessions
@@ -589,6 +595,36 @@ export function SessionEditModal({
               </button>
             </div>
           )}
+
+          {/* Color picker */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide block">
+              Farbe
+            </label>
+            <div className="flex items-center gap-2">
+              {(Object.entries(SESSION_COLORS) as [SessionColor, typeof SESSION_COLORS[SessionColor]][]).map(([key, cfg]) => {
+                const active = (selectedColor ?? "neutral") === key;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    title={cfg.label}
+                    onClick={() => setSelectedColor(key === "neutral" ? null : key)}
+                    className={`w-7 h-7 rounded-full border-2 transition-all flex items-center justify-center ${
+                      active ? "border-foreground scale-110" : "border-transparent hover:border-foreground/30 hover:scale-105"
+                    }`}
+                    style={{ backgroundColor: cfg.hex }}
+                  >
+                    {active && (
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="20 6 9 17 4 12"/>
+                      </svg>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
           {/* Cancelled toggle */}
           <ToggleRow

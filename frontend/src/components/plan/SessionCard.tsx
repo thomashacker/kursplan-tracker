@@ -1,4 +1,5 @@
-import type { TrainingSession, Profile } from "@/types";
+import type { TrainingSession, Profile, SessionColor } from "@/types";
+import { SESSION_COLORS } from "@/types";
 import { formatTime } from "@/lib/utils/date";
 
 interface Props {
@@ -12,6 +13,10 @@ interface Props {
 
 export function SessionCard({ session, trainers, canEdit, isToday, onEdit, onDelete }: Props) {
   const cancelled = session.is_cancelled;
+  const colorKey = (session.color ?? "neutral") as SessionColor;
+  const colorCfg = SESSION_COLORS[colorKey] ?? SESSION_COLORS.neutral;
+  const hasColor = colorKey !== "neutral" && !cancelled;
+
   const trainerProfiles: Profile[] = session.session_trainers?.length
     ? session.session_trainers.map((st) => trainers.find((t) => t.id === st.user_id)).filter((t): t is Profile => Boolean(t))
     : trainers.filter((t) => t.id === session.trainer_id);
@@ -24,10 +29,11 @@ export function SessionCard({ session, trainers, canEdit, isToday, onEdit, onDel
       className={`relative rounded-xl border p-3 text-sm group transition-shadow hover:shadow-sm ${
         cancelled
           ? "border-destructive/30 bg-destructive/5 opacity-75"
-          : isToday
+          : isToday && !hasColor
           ? "border-primary/40 bg-primary/5 bg-card"
           : "border-border bg-card"
       }`}
+      style={hasColor ? { backgroundColor: colorCfg.bg, borderColor: colorCfg.border } : undefined}
     >
       {/* Recurring badge */}
       {session.template_id && !session.is_modified && !cancelled && (

@@ -2,6 +2,8 @@
 
 import { useState, useMemo } from "react";
 import { formatTime } from "@/lib/utils/date";
+import type { SessionColor } from "@/types";
+import { SESSION_COLORS } from "@/types";
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -25,6 +27,7 @@ export type PublicSession = {
   location: { name: string; mapsUrl: string | null } | null;
   trainerNames: string[];   // for filter logic
   trainers: TrainerInfo[];  // for display (with avatars)
+  color: string | null;
 };
 
 export type FilterOptions = {
@@ -72,8 +75,17 @@ function Chip({ label, active, onClick }: { label: string; active: boolean; onCl
 
 function SessionRow({ s }: { s: PublicSession }) {
   const cancelled = s.isCancelled;
+  const colorKey = (s.color ?? "neutral") as SessionColor;
+  const colorCfg = SESSION_COLORS[colorKey] ?? SESSION_COLORS.neutral;
+  const hasColor = colorKey !== "neutral" && !cancelled;
   return (
-    <div className={`px-5 py-4 flex items-start gap-4 transition-colors ${cancelled ? "bg-destructive/3" : "hover:bg-secondary/20"}`}>
+    <div className={`flex items-stretch transition-colors ${cancelled ? "bg-destructive/3" : "hover:bg-secondary/20"}`}>
+      {/* Color accent bar */}
+      <div
+        className="w-1 shrink-0 rounded-l-sm"
+        style={{ backgroundColor: hasColor ? colorCfg.border : "transparent" }}
+      />
+      <div className="flex-1 px-5 py-4 flex items-start gap-4">
       <div className="w-24 shrink-0">
         <p className={`text-xs font-mono ${cancelled ? "text-muted-foreground/50 line-through" : "text-muted-foreground"}`}>
           {formatTime(s.timeStart)} – {formatTime(s.timeEnd)}
@@ -129,6 +141,7 @@ function SessionRow({ s }: { s: PublicSession }) {
             )}
           </div>
         )}
+      </div>
       </div>
     </div>
   );
@@ -322,8 +335,12 @@ export default function PublicPlanClient({
     });
   }, [sessions, activeTypes, activeTopics, activeTrainers, activeLocations, activeCount]);
 
-  const next     = filtered.find((s) => !s.isCancelled) ?? null;
-  const upcoming = filtered.filter((s) => s !== next);
+  const next            = filtered.find((s) => !s.isCancelled) ?? null;
+  const nextConcurrent  = next
+    ? filtered.filter((s) => !s.isCancelled && s.dateKey === next.dateKey && s.timeStart === next.timeStart)
+    : [];
+  const nextIds         = new Set(nextConcurrent.map((s) => s.id));
+  const upcoming        = filtered.filter((s) => !nextIds.has(s.id));
 
   const grouped = useMemo(() => {
     const map = new Map<string, PublicSession[]>();
@@ -446,49 +463,60 @@ export default function PublicPlanClient({
           {/* Next training */}
           {next ? (
             <section>
-              <p className="text-xs font-semibold uppercase tracking-widest text-primary mb-4">Nächstes Training</p>
+              <p className="text-xs font-semibold uppercase tracking-widest text-primary mb-4">
+                Nächstes Training{nextConcurrent.length > 1 && <span className="ml-2 font-normal normal-case tracking-normal text-primary/60">· {nextConcurrent.length} gleichzeitig</span>}
+              </p>
               <div className="rounded-2xl border border-primary/25 bg-primary/5 p-7">
-                <p className="text-xs font-semibold uppercase tracking-widest text-primary/70 mb-2">{next.fullLabel}</p>
-                <p className="font-bold text-2xl leading-tight mb-3" style={{ fontFamily: "var(--font-syne, system-ui)" }}>
-                  {[...next.sessionTypes, ...next.topics].join(" · ") || "Training"}
-                </p>
-                {(next.sessionTypes.length > 0 || next.topics.length > 0) && (
-                  <div className="flex flex-wrap gap-1.5 mb-3">
-                    {next.sessionTypes.map((t) => <span key={t} className="text-xs font-semibold px-2.5 py-1 rounded-full bg-primary/15 text-primary border border-primary/20">{t}</span>)}
-                    {next.topics.map((t) => <span key={t} className="text-xs font-medium px-2.5 py-1 rounded-full bg-secondary text-secondary-foreground">{t}</span>)}
-                  </div>
-                )}
-                <div className="flex flex-wrap gap-x-5 gap-y-1.5 text-sm text-muted-foreground">
-                  <span className="font-mono font-medium text-foreground">{formatTime(next.timeStart)} – {formatTime(next.timeEnd)}</span>
-                  {next.location && (
-                    <span className="flex items-center gap-1">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-                      {next.location.mapsUrl
-                        ? <a href={next.location.mapsUrl} target="_blank" rel="noopener noreferrer" className="hover:underline">{next.location.name}</a>
-                        : next.location.name}
-                    </span>
-                  )}
-                  {next.trainers.length > 0 && (
-                    <span className="flex flex-wrap items-center gap-1.5">
-                      {next.trainers.map((t) => (
-                        <span key={t.name} className={`inline-flex items-center gap-1 ${t.isGuest ? "text-amber-700 dark:text-amber-400" : ""}`}>
-                          {t.avatarUrl ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={t.avatarUrl} alt={t.name} className="w-4 h-4 rounded-full object-cover shrink-0" />
-                          ) : (
-                            <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold shrink-0 ${
-                              t.isGuest ? "bg-amber-500/15 border border-amber-500/30 text-amber-700 dark:text-amber-400" : "bg-primary/15 text-primary"
-                            }`}>
-                              {t.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
-                            </span>
-                          )}
-                          {t.name}
-                        </span>
-                      ))}
-                    </span>
-                  )}
+                {/* Shared date + start time */}
+                <p className="text-xs font-semibold uppercase tracking-widest text-primary/70 mb-1">{next.fullLabel}</p>
+                <p className="font-mono font-medium text-sm text-foreground mb-5">{formatTime(next.timeStart)}</p>
+
+                <div className={nextConcurrent.length > 1 ? "space-y-5 divide-y divide-primary/15" : ""}>
+                  {nextConcurrent.map((s, i) => (
+                    <div key={s.id} className={i > 0 ? "pt-5" : ""}>
+                      <p className={`font-bold leading-tight mb-2 ${nextConcurrent.length > 1 ? "text-lg" : "text-2xl mb-3"}`} style={{ fontFamily: "var(--font-syne, system-ui)" }}>
+                        {[...s.sessionTypes, ...s.topics].join(" · ") || "Training"}
+                      </p>
+                      {(s.sessionTypes.length > 0 || s.topics.length > 0) && (
+                        <div className="flex flex-wrap gap-1.5 mb-3">
+                          {s.sessionTypes.map((t) => <span key={t} className="text-xs font-semibold px-2.5 py-1 rounded-full bg-primary/15 text-primary border border-primary/20">{t}</span>)}
+                          {s.topics.map((t) => <span key={t} className="text-xs font-medium px-2.5 py-1 rounded-full bg-secondary text-secondary-foreground">{t}</span>)}
+                        </div>
+                      )}
+                      <div className="flex flex-wrap gap-x-5 gap-y-1.5 text-sm text-muted-foreground">
+                        <span className="font-mono text-muted-foreground">– {formatTime(s.timeEnd)}</span>
+                        {s.location && (
+                          <span className="flex items-center gap-1">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                            {s.location.mapsUrl
+                              ? <a href={s.location.mapsUrl} target="_blank" rel="noopener noreferrer" className="hover:underline">{s.location.name}</a>
+                              : s.location.name}
+                          </span>
+                        )}
+                        {s.trainers.length > 0 && (
+                          <span className="flex flex-wrap items-center gap-1.5">
+                            {s.trainers.map((t) => (
+                              <span key={t.name} className={`inline-flex items-center gap-1 ${t.isGuest ? "text-amber-700 dark:text-amber-400" : ""}`}>
+                                {t.avatarUrl ? (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img src={t.avatarUrl} alt={t.name} className="w-4 h-4 rounded-full object-cover shrink-0" />
+                                ) : (
+                                  <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold shrink-0 ${
+                                    t.isGuest ? "bg-amber-500/15 border border-amber-500/30 text-amber-700 dark:text-amber-400" : "bg-primary/15 text-primary"
+                                  }`}>
+                                    {t.name.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase()}
+                                  </span>
+                                )}
+                                {t.name}
+                              </span>
+                            ))}
+                          </span>
+                        )}
+                      </div>
+                      {s.description && <p className="text-sm text-muted-foreground mt-3 italic">{s.description}</p>}
+                    </div>
+                  ))}
                 </div>
-                {next.description && <p className="text-sm text-muted-foreground mt-3 italic">{next.description}</p>}
               </div>
             </section>
           ) : (
