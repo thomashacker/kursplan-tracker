@@ -499,6 +499,31 @@ export function SessionEditModal({
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4 pt-1">
+          {/* Color picker */}
+          <div className="flex items-center gap-2">
+            {(Object.entries(SESSION_COLORS) as [SessionColor, typeof SESSION_COLORS[SessionColor]][]).map(([key, cfg]) => {
+              const active = (selectedColor ?? "neutral") === key;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  title={cfg.label}
+                  onClick={() => setSelectedColor(key === "neutral" ? null : key)}
+                  className={`w-7 h-7 rounded-full border-2 transition-all flex items-center justify-center ${
+                    active ? "border-foreground scale-110" : "border-transparent hover:border-foreground/30 hover:scale-105"
+                  }`}
+                  style={{ backgroundColor: cfg.hex }}
+                >
+                  {active && (
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="20 6 9 17 4 12"/>
+                    </svg>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
           {/* Row: Day + Time */}
           <div className="grid grid-cols-3 gap-3">
             <div className="space-y-1.5 col-span-1">
@@ -639,36 +664,6 @@ export function SessionEditModal({
               </button>
             </div>
           )}
-
-          {/* Color picker */}
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide block">
-              Farbe
-            </label>
-            <div className="flex items-center gap-2">
-              {(Object.entries(SESSION_COLORS) as [SessionColor, typeof SESSION_COLORS[SessionColor]][]).map(([key, cfg]) => {
-                const active = (selectedColor ?? "neutral") === key;
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    title={cfg.label}
-                    onClick={() => setSelectedColor(key === "neutral" ? null : key)}
-                    className={`w-7 h-7 rounded-full border-2 transition-all flex items-center justify-center ${
-                      active ? "border-foreground scale-110" : "border-transparent hover:border-foreground/30 hover:scale-105"
-                    }`}
-                    style={{ backgroundColor: cfg.hex }}
-                  >
-                    {active && (
-                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="20 6 9 17 4 12"/>
-                      </svg>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
 
           {/* Cancelled toggle — danger zone */}
           <div className={`rounded-xl border-2 border-dashed p-3 transition-colors ${isCancelled ? "border-destructive/60 bg-destructive/5" : "border-destructive/25 bg-destructive/[0.02]"}`}>
