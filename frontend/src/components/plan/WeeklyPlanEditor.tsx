@@ -313,9 +313,16 @@ function DayTimetable({
         </div>
       ) : (
         <div className="rounded-xl border border-border overflow-hidden">
+          {/* Horizontal scroll wrapper — lets sessions breathe on narrow screens */}
+          <div className="overflow-x-auto">
+          {(() => {
+            const maxLanes = Math.max(...Array.from(layout.values()).map(v => v.totalLanes), 1);
+            const MIN_LANE_PX = 160;
+            const sessionAreaMinWidth = maxLanes * MIN_LANE_PX;
+            return (
           <div className="flex" style={{ height: Math.max(gridH, 0), minHeight: "calc(100svh - 220px)" }}>
-            {/* Time labels */}
-            <div className="w-14 shrink-0 relative border-r border-border">
+            {/* Time labels — sticky so they stay visible while grid scrolls */}
+            <div className="w-14 shrink-0 relative border-r border-border sticky left-0 z-10 bg-background">
               {hours.map((h) => (
                 <div
                   key={h}
@@ -328,7 +335,7 @@ function DayTimetable({
             </div>
 
             {/* Session area */}
-            <div className="flex-1 relative">
+            <div className="relative" style={{ minWidth: sessionAreaMinWidth, flex: "1 0 auto" }}>
               {/* Hour lines */}
               {hours.map((h) => (
                 <div
@@ -480,6 +487,9 @@ function DayTimetable({
               })}
             </div>
           </div>
+          );
+          })()}
+          </div>{/* end overflow-x-auto */}
         </div>
       )}
     </motion.div>
