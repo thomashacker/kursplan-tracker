@@ -625,9 +625,9 @@ export function SessionEditModal({
               {makeRecurring && (
                 <div className="rounded-xl border border-input px-3 py-2.5 flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-sm font-medium">Automatisch verlängern</p>
+                    <p className="text-sm font-medium">Automatisch fortführen</p>
                     <p className="text-xs text-muted-foreground">
-                      Ein wöchentlicher Hintergrundjob verlängert automatisch um weitere 8 Wochen, bevor der Horizont endet.
+                      Das Training wird laufend in den nächsten Wochen eingeplant, solange diese Option aktiv ist.
                     </p>
                   </div>
                   <button
@@ -648,9 +648,9 @@ export function SessionEditModal({
           {isRecurring && editScope === "future" && (
             <div className="rounded-xl border border-input px-3 py-2.5 flex items-start justify-between gap-3">
               <div>
-                <p className="text-sm font-medium">Automatisch verlängern</p>
+                <p className="text-sm font-medium">Automatisch fortführen</p>
                 <p className="text-xs text-muted-foreground">
-                  Hintergrundjob verlängert automatisch, bevor der Horizont endet.
+                  Das Training wird laufend in den nächsten Wochen eingeplant, solange diese Option aktiv ist.
                 </p>
               </div>
               <button
