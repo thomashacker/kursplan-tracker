@@ -57,7 +57,10 @@ export default function MitgliederPage() {
   const [virtualTrainers, setVirtualTrainers] = useState<VirtualTrainer[]>([]);
   const [trainerDialog, setTrainerDialog] = useState<{ mode: "add" | "edit"; trainer?: VirtualTrainer } | null>(null);
   const [trainerName, setTrainerName] = useState("");
-  const [trainerAvatarUrl, setTrainerAvatarUrl] = useState("");
+  const [trainerAvatarUrl, setTrainerAvatarUrl] = useState<string | null>(null);
+  const [trainerAvatarFile, setTrainerAvatarFile] = useState<File | null>(null);
+  const [trainerAvatarPreview, setTrainerAvatarPreview] = useState<string | null>(null);
+  const trainerAvatarInputRef = useRef<HTMLInputElement>(null);
   const [trainerNotes, setTrainerNotes] = useState("");
   const [trainerSaving, setTrainerSaving] = useState(false);
   const [removeTrainerTarget, setRemoveTrainerTarget] = useState<VirtualTrainer | null>(null);
@@ -211,35 +214,66 @@ export default function MitgliederPage() {
   // ── virtual trainer dialog helpers ───────────────────────────
   function openAddTrainer() {
     setTrainerName("");
-    setTrainerAvatarUrl("");
+    setTrainerAvatarUrl(null);
+    setTrainerAvatarFile(null);
+    setTrainerAvatarPreview(null);
     setTrainerNotes("");
     setTrainerDialog({ mode: "add" });
   }
 
   function openEditTrainer(vt: VirtualTrainer) {
     setTrainerName(vt.name);
-    setTrainerAvatarUrl(vt.avatar_url ?? "");
+    setTrainerAvatarUrl(vt.avatar_url ?? null);
+    setTrainerAvatarFile(null);
+    setTrainerAvatarPreview(vt.avatar_url ?? null);
     setTrainerNotes(vt.notes ?? "");
     setTrainerDialog({ mode: "edit", trainer: vt });
+  }
+
+  function handleTrainerAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setTrainerAvatarFile(file);
+    setTrainerAvatarPreview(URL.createObjectURL(file));
+  }
+
+  async function uploadVirtualTrainerAvatar(supabase: ReturnType<typeof createClient>, id: string, file: File): Promise<string> {
+    const ext = file.name.split(".").pop() ?? "jpg";
+    const path = `virtual_trainers/${id}/avatar.${ext}`;
+    await supabase.storage.from("avatars").upload(path, file, { contentType: file.type, upsert: true });
+    const { data } = supabase.storage.from("avatars").getPublicUrl(path);
+    return `${data.publicUrl}?t=${Date.now()}`;
   }
 
   async function handleSaveTrainer() {
     if (!club || !trainerName.trim()) return;
     setTrainerSaving(true);
     const supabase = createClient();
-    const payload = {
-      club_id: club.id,
-      name: trainerName.trim(),
-      avatar_url: trainerAvatarUrl.trim() || null,
-      notes: trainerNotes.trim() || null,
-    };
 
     if (trainerDialog?.mode === "add") {
-      const { error } = await supabase.from("virtual_trainers").insert(payload);
-      if (error) { toast.error(error.message); setTrainerSaving(false); return; }
-      toast.success(`${payload.name} hinzugefügt.`);
+      const { data: newTrainer, error } = await supabase
+        .from("virtual_trainers")
+        .insert({ club_id: club.id, name: trainerName.trim(), avatar_url: null, notes: trainerNotes.trim() || null })
+        .select()
+        .single<VirtualTrainer>();
+      if (error || !newTrainer) { toast.error(error?.message ?? "Fehler"); setTrainerSaving(false); return; }
+
+      if (trainerAvatarFile) {
+        const url = await uploadVirtualTrainerAvatar(supabase, newTrainer.id, trainerAvatarFile);
+        await supabase.from("virtual_trainers").update({ avatar_url: url }).eq("id", newTrainer.id);
+      }
+      toast.success(`${trainerName.trim()} hinzugefügt.`);
     } else if (trainerDialog?.trainer) {
-      const { error } = await supabase.from("virtual_trainers").update(payload).eq("id", trainerDialog.trainer.id);
+      const id = trainerDialog.trainer.id;
+      let avatarUrl = trainerAvatarUrl;
+      if (trainerAvatarFile) {
+        avatarUrl = await uploadVirtualTrainerAvatar(supabase, id, trainerAvatarFile);
+      }
+      const { error } = await supabase.from("virtual_trainers").update({
+        name: trainerName.trim(),
+        avatar_url: avatarUrl,
+        notes: trainerNotes.trim() || null,
+      }).eq("id", id);
       if (error) { toast.error(error.message); setTrainerSaving(false); return; }
       toast.success("Trainer aktualisiert.");
     }
@@ -384,9 +418,19 @@ export default function MitgliederPage() {
       {(isAdmin || virtualTrainers.length > 0) && (
         <div className="mb-8">
           <div className="flex items-center justify-between mb-3">
-            <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-              Feste Trainer
-            </p>
+            <div className="flex items-center gap-1.5">
+              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                Feste Trainer
+              </p>
+              <div className="relative group/tip">
+                <svg className="text-muted-foreground/50 hover:text-muted-foreground cursor-default transition-colors" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
+                </svg>
+                <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 z-30 hidden group-hover/tip:block w-64 p-3 rounded-xl border border-border bg-popover shadow-lg text-xs text-muted-foreground leading-relaxed pointer-events-none">
+                  Feste Trainer müssen sich <span className="font-semibold text-foreground">nicht registrieren</span> — sie erscheinen einfach in der Trainerauswahl. Nützlich für externe Coaches oder Gasttrainer, die regelmäßig dabei sind. Admins können sie hier verwalten.
+                </div>
+              </div>
+            </div>
             {isAdmin && (
               <button
                 type="button"
@@ -627,23 +671,53 @@ export default function MitgliederPage() {
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="trainer-avatar" className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                Avatar-URL <span className="text-muted-foreground/60 font-normal normal-case">(optional)</span>
+              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Foto <span className="text-muted-foreground/60 font-normal normal-case">(optional)</span>
               </Label>
-              <Input
-                id="trainer-avatar"
-                value={trainerAvatarUrl}
-                onChange={(e) => setTrainerAvatarUrl(e.target.value)}
-                placeholder="https://…"
-                className="h-10 rounded-xl text-sm"
-              />
-              {trainerAvatarUrl && (
-                <div className="flex items-center gap-2 mt-1">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={trainerAvatarUrl} alt="Vorschau" className="w-10 h-10 rounded-full object-cover border border-border" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
-                  <p className="text-xs text-muted-foreground">Vorschau</p>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => trainerAvatarInputRef.current?.click()}
+                  className="relative shrink-0 w-14 h-14 rounded-full bg-indigo-500/10 border-2 border-dashed border-indigo-500/30 hover:border-indigo-500/60 overflow-hidden flex items-center justify-center transition-colors group"
+                  title="Foto hochladen"
+                >
+                  {trainerAvatarPreview ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={trainerAvatarPreview} alt="Vorschau" className="w-full h-full object-cover" />
+                  ) : (
+                    <svg className="text-indigo-400 group-hover:text-indigo-600 transition-colors" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                      <polyline points="17 8 12 3 7 8"/>
+                      <line x1="12" y1="3" x2="12" y2="15"/>
+                    </svg>
+                  )}
+                </button>
+                <input
+                  ref={trainerAvatarInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="sr-only"
+                  onChange={handleTrainerAvatarChange}
+                />
+                <div className="flex flex-col gap-1">
+                  <button
+                    type="button"
+                    onClick={() => trainerAvatarInputRef.current?.click()}
+                    className="text-xs text-primary hover:underline text-left"
+                  >
+                    {trainerAvatarPreview ? "Foto ändern" : "Foto hochladen"}
+                  </button>
+                  {trainerAvatarPreview && (
+                    <button
+                      type="button"
+                      onClick={() => { setTrainerAvatarFile(null); setTrainerAvatarPreview(null); setTrainerAvatarUrl(null); if (trainerAvatarInputRef.current) trainerAvatarInputRef.current.value = ""; }}
+                      className="text-xs text-muted-foreground hover:text-destructive text-left transition-colors"
+                    >
+                      Foto entfernen
+                    </button>
+                  )}
                 </div>
-              )}
+              </div>
             </div>
 
             <div className="space-y-1.5">
