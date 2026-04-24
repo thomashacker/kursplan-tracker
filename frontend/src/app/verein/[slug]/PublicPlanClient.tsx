@@ -139,6 +139,9 @@ function SessionRow({ s }: { s: PublicSession }) {
             )}
           </div>
         )}
+        {!cancelled && s.description && (
+          <p className="text-xs text-muted-foreground mt-1.5 italic leading-relaxed">{s.description}</p>
+        )}
       </div>
       </div>
     </div>
