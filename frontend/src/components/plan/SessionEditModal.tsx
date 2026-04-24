@@ -670,14 +670,17 @@ export function SessionEditModal({
             </div>
           </div>
 
-          {/* Cancelled toggle */}
-          <ToggleRow
-            title="Training abgesagt"
-            description="Das Training wird als abgesagt markiert und rot angezeigt."
-            checked={isCancelled}
-            onChange={setIsCancelled}
-            destructive
-          />
+          {/* Cancelled toggle — danger zone */}
+          <div className={`rounded-xl border-2 border-dashed p-3 transition-colors ${isCancelled ? "border-destructive/60 bg-destructive/5" : "border-destructive/25 bg-destructive/[0.02]"}`}>
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-destructive/60 mb-2">Gefahrenzone</p>
+            <ToggleRow
+              title="Training abgesagt"
+              description="Das Training wird als abgesagt markiert und rot angezeigt."
+              checked={isCancelled}
+              onChange={setIsCancelled}
+              destructive
+            />
+          </div>
 
           {/* Scope picker — only for editing a recurring session, lives near save button */}
           {isRecurring && (
