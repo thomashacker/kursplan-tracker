@@ -17,7 +17,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 const spring = { type: "spring" as const, stiffness: 300, damping: 30 };
 
 const PX_PER_MIN_WEEK = 1.25; // 75px / hr  — timetable in week context
-const PX_PER_MIN_DAY  = 2;    // 120px / hr — full-day drill-down
+const PX_PER_MIN_DAY  = 3;    // 180px / hr — full-day drill-down
 
 const MONTH_NAMES = [
   "Januar","Februar","März","April","Mai","Juni",
