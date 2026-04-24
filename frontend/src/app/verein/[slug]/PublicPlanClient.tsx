@@ -79,10 +79,13 @@ function SessionRow({ s }: { s: PublicSession }) {
   const colorCfg = SESSION_COLORS[colorKey] ?? SESSION_COLORS.neutral;
   const hasColor = colorKey !== "neutral" && !cancelled;
   return (
-    <div className={`flex items-stretch transition-colors ${cancelled ? "bg-destructive/3" : "hover:bg-secondary/20"}`}>
+    <div
+      className={`flex items-stretch transition-colors ${cancelled ? "bg-destructive/3" : !hasColor ? "hover:bg-secondary/20" : ""}`}
+      style={hasColor ? { backgroundColor: colorCfg.bg } : undefined}
+    >
       {/* Color accent bar */}
       <div
-        className="w-1 shrink-0 rounded-l-sm"
+        className="w-1.5 shrink-0"
         style={{ backgroundColor: hasColor ? colorCfg.border : "transparent" }}
       />
       <div className="flex-1 px-5 py-4 flex items-start gap-4">
@@ -466,21 +469,40 @@ export default function PublicPlanClient({
               <p className="text-xs font-semibold uppercase tracking-widest text-primary mb-4">
                 Nächstes Training{nextConcurrent.length > 1 && <span className="ml-2 font-normal normal-case tracking-normal text-primary/60">· {nextConcurrent.length} gleichzeitig</span>}
               </p>
-              <div className="rounded-2xl border border-primary/25 bg-primary/5 p-7">
+              {(() => {
+                const singleColor = nextConcurrent.length === 1
+                  ? (SESSION_COLORS[(next.color ?? "neutral") as SessionColor] ?? SESSION_COLORS.neutral)
+                  : null;
+                const singleHasColor = singleColor && (next.color ?? "neutral") !== "neutral";
+                return (
+                <div
+                  className={`rounded-2xl border p-7 ${singleHasColor ? "" : "border-primary/25 bg-primary/5"}`}
+                  style={singleHasColor
+                    ? { backgroundColor: singleColor!.bg, borderColor: singleColor!.border }
+                    : undefined}
+                >
                 {/* Shared date + start time */}
                 <p className="text-xs font-semibold uppercase tracking-widest text-primary/70 mb-1">{next.fullLabel}</p>
                 <p className="font-mono font-medium text-sm text-foreground mb-5">{formatTime(next.timeStart)}</p>
 
-                <div className={nextConcurrent.length > 1 ? "space-y-5 divide-y divide-primary/15" : ""}>
-                  {nextConcurrent.map((s, i) => (
-                    <div key={s.id} className={i > 0 ? "pt-5" : ""}>
+                <div className={nextConcurrent.length > 1 ? "space-y-5 divide-y divide-border/60" : ""}>
+                  {nextConcurrent.map((s, i) => {
+                    const ck = (s.color ?? "neutral") as SessionColor;
+                    const cc = SESSION_COLORS[ck] ?? SESSION_COLORS.neutral;
+                    const hc = ck !== "neutral" && nextConcurrent.length > 1;
+                    return (
+                    <div
+                      key={s.id}
+                      className={`${i > 0 ? "pt-5" : ""} ${hc ? "rounded-xl px-3 py-3 -mx-3" : ""}`}
+                      style={hc ? { backgroundColor: cc.bg, borderLeft: `3px solid ${cc.border}`, paddingLeft: "12px" } : undefined}
+                    >
                       <p className={`font-bold leading-tight mb-2 ${nextConcurrent.length > 1 ? "text-lg" : "text-2xl mb-3"}`} style={{ fontFamily: "var(--font-syne, system-ui)" }}>
-                        {[...s.sessionTypes, ...s.topics].join(" · ") || "Training"}
+                        {[...s.topics, ...s.sessionTypes].join(" · ") || "Training"}
                       </p>
-                      {(s.sessionTypes.length > 0 || s.topics.length > 0) && (
+                      {(s.topics.length > 0 || s.sessionTypes.length > 0) && (
                         <div className="flex flex-wrap gap-1.5 mb-3">
-                          {s.sessionTypes.map((t) => <span key={t} className="text-xs font-semibold px-2.5 py-1 rounded-full bg-primary/15 text-primary border border-primary/20">{t}</span>)}
-                          {s.topics.map((t) => <span key={t} className="text-xs font-medium px-2.5 py-1 rounded-full bg-secondary text-secondary-foreground">{t}</span>)}
+                          {s.topics.map((t) => <span key={t} className="text-xs font-semibold px-2.5 py-1 rounded-full bg-primary/15 text-primary border border-primary/20">{t}</span>)}
+                          {s.sessionTypes.map((t) => <span key={t} className="text-xs font-medium px-2.5 py-1 rounded-full bg-secondary text-secondary-foreground">{t}</span>)}
                         </div>
                       )}
                       <div className="flex flex-wrap gap-x-5 gap-y-1.5 text-sm text-muted-foreground">
@@ -515,9 +537,12 @@ export default function PublicPlanClient({
                       </div>
                       {s.description && <p className="text-sm text-muted-foreground mt-3 italic">{s.description}</p>}
                     </div>
-                  ))}
+                  );
+                  })}
                 </div>
-              </div>
+                </div>
+                );
+              })()}
             </section>
           ) : (
             <div className="text-center py-16">
