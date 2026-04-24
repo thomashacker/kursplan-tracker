@@ -453,7 +453,7 @@ function DayTimetable({
                     )}
 
                     {canEdit && (
-                      <div className="absolute top-1.5 right-1.5 hidden group-hover:flex gap-0.5 bg-background/90 rounded-lg p-0.5 shadow-sm">
+                      <div className="absolute top-1.5 right-1.5 flex md:hidden md:group-hover:flex gap-0.5 bg-background/90 rounded-lg p-0.5 shadow-sm">
                         <button type="button" onClick={() => onEdit(s)}
                           className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
                           title="Bearbeiten">
