@@ -15,6 +15,7 @@ interface Tab {
 const TABS: Tab[] = [
   { label: "Trainingsplan", href: "plan" },
   { label: "Mitglieder", href: "mitglieder" },
+  { label: "Teilnehmer", href: "teilnehmer", notMember: true },
   { label: "Statistiken", href: "statistiken", notMember: true },
   { label: "Themen & Orte", href: "themen", adminOnly: true },
   { label: "Einstellungen", href: "einstellungen", adminOnly: true },

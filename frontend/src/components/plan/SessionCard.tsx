@@ -10,9 +10,10 @@ interface Props {
   isToday?: boolean;
   onEdit: () => void;
   onDelete: () => void;
+  onAttendance?: () => void;
 }
 
-export function SessionCard({ session, trainers, virtualTrainers, canEdit, isToday, onEdit, onDelete }: Props) {
+export function SessionCard({ session, trainers, virtualTrainers, canEdit, isToday, onEdit, onDelete, onAttendance }: Props) {
   const cancelled = session.is_cancelled;
   const colorKey = (session.color ?? "neutral") as SessionColor;
   const colorCfg = SESSION_COLORS[colorKey] ?? SESSION_COLORS.neutral;
@@ -145,6 +146,23 @@ export function SessionCard({ session, trainers, virtualTrainers, canEdit, isTod
       {/* Description */}
       {session.description && (
         <p className="text-xs text-muted-foreground mt-1 line-clamp-2 italic">{session.description}</p>
+      )}
+
+      {/* Attendance button — visible to all, subtle */}
+      {onAttendance && !cancelled && (
+        <button
+          type="button"
+          onClick={onAttendance}
+          className="mt-1.5 w-full flex items-center justify-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-foreground border border-dashed border-border rounded-lg py-1 hover:border-border/80 hover:bg-secondary/50 transition-colors"
+          title="Anwesenheit erfassen"
+        >
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+            <circle cx="9" cy="7" r="4"/>
+            <polyline points="16 11 18 13 22 9"/>
+          </svg>
+          Anwesenheit
+        </button>
       )}
 
       {/* Edit / Delete — always visible on mobile, hover-revealed on desktop */}

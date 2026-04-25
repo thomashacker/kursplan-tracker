@@ -11,6 +11,7 @@ import { formatTime, formatWeekRange, offsetWeek, getCurrentMonday, toISODate } 
 import { createClient } from "@/lib/supabase/client";
 import { SessionCard } from "./SessionCard";
 import { SessionEditModal, type SessionSaveData } from "./SessionEditModal";
+import { AttendanceModal } from "./AttendanceModal";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
@@ -253,6 +254,7 @@ function DayTimetable({
   onDelete,
   onNewSession,
   onBack,
+  onAttendance,
 }: {
   dayIndex: number;
   weekStart: string;
@@ -264,6 +266,7 @@ function DayTimetable({
   onDelete: (s: TrainingSession) => void;
   onNewSession: (day: number) => void;
   onBack: () => void;
+  onAttendance: (s: TrainingSession) => void;
 }) {
   const daySessions = sessions
     .filter((s) => s.day_of_week === dayIndex)
@@ -459,6 +462,18 @@ function DayTimetable({
                       <p className="text-xs text-muted-foreground mt-1 italic line-clamp-2">{s.description}</p>
                     )}
 
+                    {/* Attendance button in timetable */}
+                    <button
+                      type="button"
+                      onClick={() => onAttendance(s)}
+                      className="absolute bottom-1.5 left-1.5 right-1.5 md:hidden md:group-hover:flex hidden items-center justify-center gap-1 text-[9px] font-medium text-muted-foreground/70 hover:text-foreground border border-dashed border-border/50 rounded py-0.5 hover:bg-secondary/30 transition-colors"
+                    >
+                      <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
+                        <polyline points="16 11 18 13 22 9"/>
+                      </svg>
+                      Anwesenheit
+                    </button>
                     {canEdit && (
                       <div className="absolute top-1.5 right-1.5 flex md:hidden md:group-hover:flex gap-0.5 bg-background/90 rounded-lg p-0.5 shadow-sm">
                         <button type="button" onClick={() => onEdit(s)}
@@ -640,6 +655,7 @@ export function WeeklyPlanEditor({
   const [week, setWeek] = useState(initialWeek);
   const [editingSession, setEditingSession] = useState<TrainingSession | null | "new">(null);
   const [newSessionDay, setNewSessionDay] = useState<number>(0);
+  const [attendanceSession, setAttendanceSession] = useState<TrainingSession | null>(null);
   const [view, setView] = useState<View>("week");
   const [selectedDay, setSelectedDay] = useState<number | null>(null); // drill-down
   const [hasChanges, setHasChanges] = useState(false);
@@ -1282,6 +1298,7 @@ export function WeeklyPlanEditor({
               onDelete={requestDelete}
               onNewSession={openNewSession}
               onBack={() => setSelectedDay(null)}
+              onAttendance={(s) => setAttendanceSession(s)}
             />
           ) : (
             <>
@@ -1330,7 +1347,7 @@ export function WeeklyPlanEditor({
                             <p className="text-xs text-muted-foreground/50 py-1 px-1">Kein Training</p>
                           ) : (
                             daySessions.map((session) => (
-                              <SessionCard key={session.id} session={session} trainers={trainers} virtualTrainers={virtualTrainers} canEdit={canEdit} isToday={isToday} onEdit={() => setEditingSession(session)} onDelete={() => requestDelete(session)} />
+                              <SessionCard key={session.id} session={session} trainers={trainers} virtualTrainers={virtualTrainers} canEdit={canEdit} isToday={isToday} onEdit={() => setEditingSession(session)} onDelete={() => requestDelete(session)} onAttendance={() => setAttendanceSession(session)} />
                             ))
                           )}
                         </div>
@@ -1365,7 +1382,7 @@ export function WeeklyPlanEditor({
                       </button>
                       <div className="flex-1 space-y-2">
                         {daySessions.map((session) => (
-                          <SessionCard key={session.id} session={session} trainers={trainers} virtualTrainers={virtualTrainers} canEdit={canEdit} isToday={isToday} onEdit={() => setEditingSession(session)} onDelete={() => requestDelete(session)} />
+                          <SessionCard key={session.id} session={session} trainers={trainers} virtualTrainers={virtualTrainers} canEdit={canEdit} isToday={isToday} onEdit={() => setEditingSession(session)} onDelete={() => requestDelete(session)} onAttendance={() => setAttendanceSession(session)} />
                         ))}
                         {canEdit && (
                           <button onClick={() => openNewSession(dayIndex)} className="w-full text-xs text-muted-foreground/50 border border-dashed border-border rounded-xl py-2 hover:border-primary/40 hover:text-primary transition-colors">
@@ -1401,6 +1418,16 @@ export function WeeklyPlanEditor({
           sessionTypes={sessionTypes}
           onSave={handleSaveSession}
           onClose={() => setEditingSession(null)}
+        />
+      )}
+
+      {/* ── Attendance Modal ───────────────────────────────── */}
+      {attendanceSession && (
+        <AttendanceModal
+          session={attendanceSession}
+          clubId={club.id}
+          canEdit={canEdit}
+          onClose={() => setAttendanceSession(null)}
         />
       )}
 

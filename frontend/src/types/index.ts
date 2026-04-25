@@ -117,6 +117,8 @@ export interface TrainingSession {
   color: string | null;
   created_at: string;
   updated_at: string;
+  // attendance
+  expected_attendance?: ExpectedAttendance;
   locations?: Location;
   profiles?: Profile; // trainer profile (deprecated, use session_trainers)
   session_trainers?: SessionTrainer[];
@@ -170,6 +172,62 @@ export const ROLE_LABELS: Record<Role, string> = {
   trainer: "Trainer",
   member: "Mitglied",
 };
+
+// ── Teilnehmer (attendance tracking) ─────────────────────────────────────────
+
+export interface Teilnehmer {
+  id: string;
+  club_id: string;
+  name: string;
+  created_by: string | null;
+  created_at: string;
+  // joined relations
+  groups?: TeilnehmerGroup[];
+}
+
+export interface TeilnehmerGroup {
+  id: string;
+  club_id: string;
+  name: string;
+  color: string | null;
+  created_at: string;
+  // joined relations
+  members?: Teilnehmer[];
+  member_count?: number;
+}
+
+export interface TeilnehmerGroupMember {
+  group_id: string;
+  teilnehmer_id: string;
+}
+
+export type AttendanceStatus = "present" | "absent" | "excused";
+export type AttendanceMethod = "qr" | "manual";
+export type ExpectedAttendance = "everyone" | "groups" | "open";
+
+export interface SessionAttendance {
+  id: string;
+  session_id: string;
+  teilnehmer_id: string;
+  status: AttendanceStatus;
+  checked_in_at: string;
+  checked_in_by: string | null;
+  method: AttendanceMethod;
+  // joined
+  teilnehmer?: Teilnehmer;
+}
+
+export interface SessionExpectedGroup {
+  session_id: string;
+  group_id: string;
+  teilnehmer_groups?: TeilnehmerGroup;
+}
+
+/** QR code payload — encoded on every Teilnehmer card */
+export interface TeilnehmerQRPayload {
+  id: string;   // Teilnehmer UUID
+  name: string; // display name (for add-by-scan flow)
+}
 
 export const SUGGESTED_TAGS = [
   "Technik",

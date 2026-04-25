@@ -111,6 +111,57 @@ export default async function StatistikenPage({
     (w) => (w.training_sessions as unknown[]).length > 0
   ).length;
 
+  // ── Attendance KPIs ──────────────────────────────────────────
+  // Fetch all session_attendance records for this club's past sessions
+  const pastSessionIds = (pastWeeks ?? []).flatMap((w) =>
+    (w.training_sessions as { id: string; is_cancelled: boolean }[])
+      .filter((s) => !s.is_cancelled)
+      .map((s) => s.id)
+  );
+
+  const { data: attendanceRows } = pastSessionIds.length
+    ? await supabase
+        .from("session_attendance")
+        .select("session_id, status, teilnehmer_id")
+        .in("session_id", pastSessionIds)
+    : { data: [] };
+
+  const { data: teilnehmerCount } = await supabase
+    .from("teilnehmer")
+    .select("id", { count: "exact", head: true })
+    .eq("club_id", club.id);
+
+  const totalCheckIns   = (attendanceRows ?? []).filter((a) => a.status === "present").length;
+  const totalExcused    = (attendanceRows ?? []).filter((a) => a.status === "excused").length;
+
+  // Sessions with any attendance recorded
+  const sessionsWithAttendance = new Set((attendanceRows ?? []).map((a) => a.session_id)).size;
+
+  // Average check-ins per session (only sessions that have data)
+  const avgCheckIns = sessionsWithAttendance > 0
+    ? (totalCheckIns / sessionsWithAttendance).toFixed(1)
+    : null;
+
+  // Top attended sessions (session_id → present count)
+  const sessionCheckInMap = new Map<string, number>();
+  for (const a of attendanceRows ?? []) {
+    if (a.status === "present") {
+      sessionCheckInMap.set(a.session_id, (sessionCheckInMap.get(a.session_id) ?? 0) + 1);
+    }
+  }
+  const topSessions = [...sessionCheckInMap.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5);
+
+  // Build session details map for display
+  const allSessions = (pastWeeks ?? []).flatMap((w) =>
+    (w.training_sessions as { id: string; time_start: string; time_end: string; is_cancelled: boolean }[])
+      .map((s) => ({ ...s, week_start: w.week_start }))
+  );
+  const sessionMap = Object.fromEntries(allSessions.map((s) => [s.id, s]));
+
+  const hasAttendanceData = totalCheckIns > 0 || totalExcused > 0;
+
   return (
     <div className="space-y-10 pb-10">
       <div>
@@ -136,6 +187,74 @@ export default async function StatistikenPage({
           </div>
         ))}
       </div>
+
+      {/* ── Attendance KPI cards ───────────────────────────── */}
+      {hasAttendanceData && (
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-4">
+            Anwesenheit
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <div className="rounded-2xl border border-border bg-card p-5">
+              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-2">Check-ins gesamt</p>
+              <p className="text-3xl font-bold leading-none text-green-600" style={{ fontFamily: "var(--font-syne, system-ui)" }}>
+                {totalCheckIns}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-border bg-card p-5">
+              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-2">Ø pro Training</p>
+              <p className="text-3xl font-bold leading-none" style={{ fontFamily: "var(--font-syne, system-ui)" }}>
+                {avgCheckIns ?? "—"}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-border bg-card p-5">
+              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-2">Entschuldigungen</p>
+              <p className="text-3xl font-bold leading-none text-amber-600" style={{ fontFamily: "var(--font-syne, system-ui)" }}>
+                {totalExcused}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Top attended sessions ──────────────────────────── */}
+      {topSessions.length > 0 && (
+        <section>
+          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-4">
+            Meistbesuchte Trainings
+          </p>
+          <div className="rounded-2xl border border-border bg-card overflow-hidden divide-y divide-border">
+            {topSessions.map(([sessionId, count], i) => {
+              const s = sessionMap[sessionId];
+              return (
+                <div key={sessionId} className="px-5 py-4 flex items-center gap-4">
+                  <span className="text-xs font-bold text-muted-foreground/40 w-5 shrink-0 text-right">{i + 1}</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold">
+                      {s ? `${s.time_start?.slice(0, 5)} – ${s.time_end?.slice(0, 5)}` : "Unbekannt"}
+                    </p>
+                    {s?.week_start && (
+                      <p className="text-xs text-muted-foreground font-mono">{formatDate(s.week_start)}</p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="h-1.5 w-20 bg-secondary rounded-full overflow-hidden hidden sm:block">
+                      <div
+                        className="h-full bg-green-500 rounded-full"
+                        style={{ width: `${(count / (topSessions[0]?.[1] || 1)) * 100}%` }}
+                      />
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-bold text-green-600">{count}</p>
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide">anwesend</p>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {totalSessions === 0 ? (
         <div className="text-center py-16 rounded-2xl border border-border">
