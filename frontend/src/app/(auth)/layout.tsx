@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { SiteFooter } from "@/components/layout/SiteFooter";
 
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -38,6 +39,8 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
       <div className="relative z-10 flex-1 flex items-center justify-center px-6 py-8">
         <div className="w-full max-w-sm">{children}</div>
       </div>
+
+      <SiteFooter className="relative z-10" />
     </div>
   );
 }

@@ -5,6 +5,7 @@ import { DAY_NAMES } from "@/types";
 import { getCurrentMonday, offsetWeek, toISODate, getSessionDate } from "@/lib/utils/date";
 import PublicPlanClient from "./PublicPlanClient";
 import type { PublicSession } from "./PublicPlanClient";
+import { SiteFooter } from "@/components/layout/SiteFooter";
 
 // ── Date label helpers ────────────────────────────────────────
 
@@ -165,7 +166,7 @@ export default async function PublicPlanPage({
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background flex flex-col">
       <header className="border-b bg-background">
         <div className="container max-w-2xl mx-auto px-4 py-5">
           <h1 className="text-2xl font-bold" style={{ fontFamily: "var(--font-syne, system-ui)" }}>
@@ -176,7 +177,10 @@ export default async function PublicPlanPage({
           )}
         </div>
       </header>
-      <PublicPlanClient sessions={sessions} filterOptions={filterOptions} />
+      <div className="flex-1">
+        <PublicPlanClient sessions={sessions} filterOptions={filterOptions} />
+      </div>
+      <SiteFooter />
     </div>
   );
 }

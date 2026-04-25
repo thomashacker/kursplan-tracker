@@ -41,6 +41,7 @@ export default function RegistrierenPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [termsAccepted, setTermsAccepted] = useState(false);
 
   // Email: only check once "@" has been typed (feels less aggressive)
   const emailOk = EMAIL_RE.test(email);
@@ -58,7 +59,7 @@ export default function RegistrierenPage() {
     ? "Passwörter stimmen nicht überein"
     : null;
 
-  const canSubmit = emailOk && passwordOk && confirmOk;
+  const canSubmit = emailOk && passwordOk && confirmOk && termsAccepted;
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -190,6 +191,49 @@ export default function RegistrierenPage() {
           />
           <FieldError message={confirmError} />
         </div>
+
+        {/* Terms acceptance */}
+        <label className="flex items-start gap-3 cursor-pointer group">
+          <div className="relative mt-0.5 shrink-0">
+            <input
+              type="checkbox"
+              className="sr-only peer"
+              checked={termsAccepted}
+              onChange={(e) => setTermsAccepted(e.target.checked)}
+              required
+            />
+            <div className={`w-5 h-5 rounded-md border-2 transition-colors flex items-center justify-center ${
+              termsAccepted
+                ? "border-primary bg-primary"
+                : "border-border bg-background group-hover:border-primary/50"
+            }`}>
+              {termsAccepted && (
+                <svg width="10" height="8" viewBox="0 0 10 8" fill="none" aria-hidden>
+                  <path d="M1 4L3.5 6.5L9 1" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              )}
+            </div>
+          </div>
+          <span className="text-sm text-muted-foreground leading-snug">
+            Ich habe die{" "}
+            <Link
+              href="/nutzungsbedingungen"
+              target="_blank"
+              className="font-medium text-foreground underline underline-offset-2 hover:opacity-70 transition-opacity"
+            >
+              Nutzungsbedingungen
+            </Link>{" "}
+            und die{" "}
+            <Link
+              href="/datenschutz"
+              target="_blank"
+              className="font-medium text-foreground underline underline-offset-2 hover:opacity-70 transition-opacity"
+            >
+              Datenschutzerklärung
+            </Link>{" "}
+            gelesen und akzeptiere sie.
+          </span>
+        </label>
 
         <motion.button
           type="submit"

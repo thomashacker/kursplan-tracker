@@ -146,6 +146,21 @@ export default function LandingHero() {
         }}
         aria-hidden
       />
+
+      {/* Footer */}
+      <div className="relative z-10 mt-auto flex items-center justify-center gap-5 pb-5 text-xs text-muted-foreground/50">
+        <Link href="/nutzungsbedingungen" className="hover:text-muted-foreground transition-colors">
+          Nutzungsbedingungen
+        </Link>
+        <span className="select-none">·</span>
+        <Link href="/datenschutz" className="hover:text-muted-foreground transition-colors">
+          Datenschutz
+        </Link>
+        <span className="select-none">·</span>
+        <Link href="/impressum" className="hover:text-muted-foreground transition-colors">
+          Impressum
+        </Link>
+      </div>
     </main>
   );
 }
