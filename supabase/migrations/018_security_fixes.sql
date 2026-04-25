@@ -10,7 +10,17 @@
 
 -- ── 1. Fix invitation exposure ────────────────────────────────────────────────
 
-DROP POLICY IF EXISTS "invitations_select_by_token" ON public.invitations;
+-- Drop the unsafe public policy if the table exists
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'invitations'
+  ) THEN
+    DROP POLICY IF EXISTS "invitations_select_by_token" ON public.invitations;
+  END IF;
+END;
+$$;
 
 -- Lookup a single invitation by token (safe: caller gets exactly one row
 -- only if token matches; SECURITY DEFINER bypasses RLS as intended).
