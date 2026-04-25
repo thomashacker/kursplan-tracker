@@ -30,13 +30,11 @@ export default function EinladungPage() {
       setIsLoggedIn(!!user);
       setUserEmail(user?.email ?? null);
 
-      const { data: inv, error } = await supabase
-        .from("invitations")
-        .select("*, clubs(name, slug)")
-        .eq("token", params.token)
-        .single<Invitation>();
+      const { data: rows, error } = await supabase
+        .rpc("get_invitation_by_token", { p_token: params.token });
+      const inv = rows?.[0] as Invitation | undefined ?? null;
 
-      if (error || !inv) {
+      if (error || !inv || !rows?.length) {
         setErrorMsg("Einladung nicht gefunden oder abgelaufen.");
         setState("error");
         return;
