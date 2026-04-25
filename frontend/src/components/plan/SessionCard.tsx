@@ -2,18 +2,24 @@ import type { TrainingSession, Profile, SessionColor, VirtualTrainer } from "@/t
 import { SESSION_COLORS } from "@/types";
 import { formatTime } from "@/lib/utils/date";
 
+export interface AttendanceSummary {
+  present: number;
+  expected: number | null; // null = no expected groups set
+}
+
 interface Props {
   session: TrainingSession;
   trainers: Profile[];
   virtualTrainers: VirtualTrainer[];
   canEdit: boolean;
   isToday?: boolean;
+  attendanceSummary?: AttendanceSummary;
   onEdit: () => void;
   onDelete: () => void;
   onAttendance?: () => void;
 }
 
-export function SessionCard({ session, trainers, virtualTrainers, canEdit, isToday, onEdit, onDelete, onAttendance }: Props) {
+export function SessionCard({ session, trainers, virtualTrainers, canEdit, isToday, attendanceSummary, onEdit, onDelete, onAttendance }: Props) {
   const cancelled = session.is_cancelled;
   const colorKey = (session.color ?? "neutral") as SessionColor;
   const colorCfg = SESSION_COLORS[colorKey] ?? SESSION_COLORS.neutral;
@@ -148,20 +154,39 @@ export function SessionCard({ session, trainers, virtualTrainers, canEdit, isTod
         <p className="text-xs text-muted-foreground mt-1 line-clamp-2 italic">{session.description}</p>
       )}
 
-      {/* Attendance button — visible to all, subtle */}
+      {/* Attendance button — shows count when available */}
       {onAttendance && !cancelled && (
         <button
           type="button"
           onClick={onAttendance}
-          className="mt-1.5 w-full flex items-center justify-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-foreground border border-dashed border-border rounded-lg py-1 hover:border-border/80 hover:bg-secondary/50 transition-colors"
+          className="mt-1.5 w-full flex items-center justify-between gap-1 text-[10px] font-medium text-muted-foreground hover:text-foreground border border-dashed border-border rounded-lg py-1 px-2.5 hover:border-border/80 hover:bg-secondary/50 transition-colors"
           title="Anwesenheit erfassen"
         >
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-            <circle cx="9" cy="7" r="4"/>
-            <polyline points="16 11 18 13 22 9"/>
-          </svg>
-          Anwesenheit
+          <span className="flex items-center gap-1">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+              <circle cx="9" cy="7" r="4"/>
+              <polyline points="16 11 18 13 22 9"/>
+            </svg>
+            Anwesenheit
+          </span>
+          {attendanceSummary && (
+            attendanceSummary.expected !== null ? (
+              <span className={`font-semibold tabular-nums ${
+                attendanceSummary.present > 0 && attendanceSummary.present >= attendanceSummary.expected
+                  ? "text-green-600 dark:text-green-400"
+                  : attendanceSummary.present > 0
+                  ? "text-amber-600 dark:text-amber-400"
+                  : "text-muted-foreground"
+              }`}>
+                {attendanceSummary.present}/{attendanceSummary.expected}
+              </span>
+            ) : attendanceSummary.present > 0 ? (
+              <span className="text-green-600 dark:text-green-400 font-semibold tabular-nums">
+                {attendanceSummary.present}
+              </span>
+            ) : null
+          )}
         </button>
       )}
 

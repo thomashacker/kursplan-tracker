@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useState, useCallback } from "react";
 import dynamic from "next/dynamic";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
@@ -8,9 +8,7 @@ import type {
   TrainingSession,
   Teilnehmer,
   TeilnehmerGroup,
-  SessionAttendance,
   AttendanceStatus,
-  ExpectedAttendance,
   TeilnehmerQRPayload,
 } from "@/types";
 import { DAY_NAMES } from "@/types";
@@ -72,20 +70,15 @@ export function AttendanceModal({ session, clubId, canEdit, onClose }: Props) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [scannerOpen, setScannerOpen] = useState(false);
+  const [scanResult, setScanResult] = useState<{ name: string; alreadyPresent: boolean } | null>(null);
+  const [weitereOpen, setWeitereOpen] = useState(false);
 
   // Data
   const [teilnehmer, setTeilnehmer] = useState<Teilnehmer[]>([]);
   const [groups, setGroups] = useState<TeilnehmerGroup[]>([]);
   const [groupMembers, setGroupMembers] = useState<{ group_id: string; teilnehmer_id: string }[]>([]);
   const [attendance, setAttendance] = useState<Map<string, AttendanceStatus>>(new Map());
-  const [expectedAttendance, setExpectedAttendance] = useState<ExpectedAttendance>(
-    (session.expected_attendance as ExpectedAttendance) ?? "open"
-  );
   const [expectedGroupIds, setExpectedGroupIds] = useState<string[]>([]);
-  const [savingExpected, setSavingExpected] = useState(false);
-
-  // Scan flash feedback
-  const [lastScanned, setLastScanned] = useState<string | null>(null);
 
   // ── Fetch data ──────────────────────────────────────────────────────────────
   const loadData = useCallback(async () => {
@@ -115,41 +108,20 @@ export function AttendanceModal({ session, clubId, canEdit, onClose }: Props) {
     setLoading(false);
   }, [supabase, clubId, session.id]);
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => { loadData(); }, [loadData]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
-  // ── Expected participants list ──────────────────────────────────────────────
+  // ── Expected participants (members of the session's expected groups) ──────────
+  const hasExpectedGroups = expectedGroupIds.length > 0;
   const expectedTeilnehmer: Teilnehmer[] = (() => {
-    if (expectedAttendance === "everyone") return teilnehmer;
-    if (expectedAttendance === "groups" && expectedGroupIds.length > 0) {
-      const ids = groupMembers
-        .filter((gm) => expectedGroupIds.includes(gm.group_id))
-        .map((gm) => gm.teilnehmer_id);
-      const unique = [...new Set(ids)];
-      return teilnehmer.filter((t) => unique.includes(t.id));
-    }
-    return teilnehmer; // open = show all
+    if (!hasExpectedGroups) return [];
+    const ids = groupMembers
+      .filter((gm) => expectedGroupIds.includes(gm.group_id))
+      .map((gm) => gm.teilnehmer_id);
+    const unique = [...new Set(ids)];
+    return teilnehmer.filter((t) => unique.includes(t.id));
   })();
-
-  // ── Save expected attendance mode ───────────────────────────────────────────
-  async function saveExpectedMode(mode: ExpectedAttendance, groupIds: string[]) {
-    setSavingExpected(true);
-    const { error: e1 } = await supabase
-      .from("training_sessions")
-      .update({ expected_attendance: mode })
-      .eq("id", session.id);
-    if (e1) { toast.error(e1.message); setSavingExpected(false); return; }
-
-    await supabase.from("session_expected_groups").delete().eq("session_id", session.id);
-    if (mode === "groups" && groupIds.length > 0) {
-      await supabase.from("session_expected_groups").insert(
-        groupIds.map((gid) => ({ session_id: session.id, group_id: gid }))
-      );
-    }
-    setExpectedAttendance(mode);
-    setExpectedGroupIds(mode === "groups" ? groupIds : []);
-    setSavingExpected(false);
-    toast.success("Erwartete Teilnehmer gespeichert");
-  }
 
   // ── Toggle attendance status ────────────────────────────────────────────────
   const STATUS_CYCLE: (AttendanceStatus | null)[] = ["present", "excused", "absent", null];
@@ -159,9 +131,8 @@ export function AttendanceModal({ session, clubId, canEdit, onClose }: Props) {
     const { data: { user } } = await supabase.auth.getUser();
 
     if (method === "qr") {
-      // QR scan always sets to 'present' (or removes if already present)
-      const next = currentStatus === "present" ? null : "present";
-      await applyStatus(teilnehmerId, next, "qr", user?.id);
+      // QR scan only ever marks present — never removes (handled separately in handleQRScan)
+      await applyStatus(teilnehmerId, "present", "qr", user?.id);
     } else {
       const idx = STATUS_CYCLE.indexOf(currentStatus ?? null);
       const next = STATUS_CYCLE[(idx + 1) % STATUS_CYCLE.length];
@@ -196,8 +167,10 @@ export function AttendanceModal({ session, clubId, canEdit, onClose }: Props) {
   async function markAllPresent() {
     if (!canEdit) return;
     setSaving(true);
+    // Mark expected group members if groups are set, otherwise all teilnehmer
+    const targets = hasExpectedGroups ? expectedTeilnehmer : teilnehmer;
     const { data: { user } } = await supabase.auth.getUser();
-    const rows = expectedTeilnehmer.map((t) => ({
+    const rows = targets.map((t) => ({
       session_id: session.id,
       teilnehmer_id: t.id,
       status: "present" as const,
@@ -208,7 +181,7 @@ export function AttendanceModal({ session, clubId, canEdit, onClose }: Props) {
     if (rows.length > 0) {
       await supabase.from("session_attendance").upsert(rows, { onConflict: "session_id,teilnehmer_id" });
       const map = new Map(attendance);
-      for (const t of expectedTeilnehmer) map.set(t.id, "present");
+      for (const t of targets) map.set(t.id, "present");
       setAttendance(map);
     }
     setSaving(false);
@@ -217,22 +190,30 @@ export function AttendanceModal({ session, clubId, canEdit, onClose }: Props) {
   // ── QR scan check-in ───────────────────────────────────────────────────────
   async function handleQRScan(payload: TeilnehmerQRPayload) {
     const found = teilnehmer.find((t) => t.id === payload.id);
+    setScannerOpen(false);
+
     if (!found) {
-      toast.error(`Unbekannt: ${payload.name} (${payload.id.slice(0, 8)}…)`);
+      setScanResult({ name: payload.name, alreadyPresent: false });
+      setTimeout(() => setScanResult(null), 2500);
+      toast.error(`Unbekannt: ${payload.name}`);
       return;
     }
-    const current = attendance.get(found.id);
-    await toggleStatus(found.id, current, "qr");
-    setLastScanned(found.name);
-    setTimeout(() => setLastScanned(null), 2000);
-    toast.success(`✓ ${found.name} eingestempelt`);
+
+    const alreadyPresent = attendance.get(found.id) === "present";
+
+    if (!alreadyPresent) {
+      await toggleStatus(found.id, undefined, "qr");
+    }
+
+    setScanResult({ name: found.name, alreadyPresent });
+    setTimeout(() => setScanResult(null), 2000);
   }
 
   // ── Stats ──────────────────────────────────────────────────────────────────
   const presentCount  = [...attendance.values()].filter((s) => s === "present").length;
   const excusedCount  = [...attendance.values()].filter((s) => s === "excused").length;
   const absentCount   = [...attendance.values()].filter((s) => s === "absent").length;
-  const total         = expectedTeilnehmer.length;
+  const total         = hasExpectedGroups ? expectedTeilnehmer.length : teilnehmer.length;
 
   // ── Groups of a teilnehmer (display) ──────────────────────────────────────
   function getGroupsForTeilnehmer(id: string): TeilnehmerGroup[] {
@@ -243,7 +224,7 @@ export function AttendanceModal({ session, clubId, canEdit, onClose }: Props) {
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/50">
-      <div className="w-full sm:max-w-lg max-h-[95svh] flex flex-col rounded-t-2xl sm:rounded-2xl border border-border bg-card shadow-xl overflow-hidden">
+      <div className="relative w-full sm:max-w-lg max-h-[95svh] flex flex-col rounded-t-2xl sm:rounded-2xl border border-border bg-card shadow-xl overflow-hidden">
 
         {/* ── Header ─────────────────────────────────────────── */}
         <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-border shrink-0">
@@ -280,67 +261,20 @@ export function AttendanceModal({ session, clubId, canEdit, onClose }: Props) {
           </div>
         ) : (
           <>
-            {/* ── Expected attendance config ──────────────────── */}
-            {canEdit && (
-              <div className="px-5 py-3 border-b border-border bg-secondary/20 shrink-0">
-                <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-2">
-                  Erwartete Teilnehmer
-                </p>
-                <div className="flex gap-1.5 flex-wrap">
-                  {(["open", "everyone", "groups"] as ExpectedAttendance[]).map((mode) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      onClick={() => {
-                        if (mode !== "groups") saveExpectedMode(mode, []);
-                        else setExpectedAttendance("groups"); // expand group picker
-                      }}
-                      disabled={savingExpected}
-                      className={`h-7 px-3 rounded-full text-xs font-medium transition-colors border ${
-                        expectedAttendance === mode
-                          ? "bg-primary text-primary-foreground border-primary"
-                          : "border-border hover:bg-secondary"
-                      }`}
-                    >
-                      {mode === "open" ? "Offen" : mode === "everyone" ? "Alle" : "Gruppen"}
-                    </button>
-                  ))}
-                </div>
-                {/* Group picker — shown when mode = 'groups' */}
-                {expectedAttendance === "groups" && groups.length > 0 && (
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {groups.map((g) => {
-                      const selected = expectedGroupIds.includes(g.id);
-                      return (
-                        <button
-                          key={g.id}
-                          type="button"
-                          onClick={() => {
-                            const next = selected
-                              ? expectedGroupIds.filter((id) => id !== g.id)
-                              : [...expectedGroupIds, g.id];
-                            setExpectedGroupIds(next);
-                          }}
-                          className="h-7 px-3 rounded-full text-xs font-medium transition-colors border"
-                          style={selected
-                            ? { backgroundColor: `${g.color}20`, borderColor: `${g.color}60`, color: g.color ?? undefined }
-                            : { borderColor: "var(--border)" }
-                          }
-                        >
-                          {g.name}
-                        </button>
-                      );
-                    })}
-                    <button
-                      type="button"
-                      onClick={() => saveExpectedMode("groups", expectedGroupIds)}
-                      disabled={savingExpected || expectedGroupIds.length === 0}
-                      className="h-7 px-3 rounded-full text-xs font-semibold bg-primary text-primary-foreground disabled:opacity-40 transition-opacity"
-                    >
-                      Speichern
-                    </button>
-                  </div>
-                )}
+            {/* ── Expected group badges (read-only, set in session editor) ── */}
+            {hasExpectedGroups && groups.filter((g) => expectedGroupIds.includes(g.id)).length > 0 && (
+              <div className="px-5 py-2.5 border-b border-border bg-secondary/20 shrink-0 flex flex-wrap gap-1.5 items-center">
+                <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mr-1">Gruppen:</span>
+                {groups.filter((g) => expectedGroupIds.includes(g.id)).map((g) => (
+                  <span
+                    key={g.id}
+                    className="inline-flex items-center gap-1.5 h-6 px-2.5 rounded-full text-xs font-medium border"
+                    style={{ backgroundColor: `${g.color}20`, borderColor: `${g.color}50`, color: g.color ?? undefined }}
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: g.color ?? undefined }} />
+                    {g.name}
+                  </span>
+                ))}
               </div>
             )}
 
@@ -350,7 +284,7 @@ export function AttendanceModal({ session, clubId, canEdit, onClose }: Props) {
                 <button
                   type="button"
                   onClick={markAllPresent}
-                  disabled={saving || expectedTeilnehmer.length === 0}
+                  disabled={saving || teilnehmer.length === 0}
                   className="h-8 px-3 rounded-lg border border-border text-xs font-medium hover:bg-secondary transition-colors flex items-center gap-1.5 disabled:opacity-40"
                 >
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -379,18 +313,8 @@ export function AttendanceModal({ session, clubId, canEdit, onClose }: Props) {
 
             {/* ── QR Scanner ─────────────────────────────────── */}
             {scannerOpen && canEdit && (
-              <div className="border-b border-border shrink-0">
+              <div className="w-full border-b border-border shrink-0">
                 <InlineQRScanner onScan={handleQRScan} />
-                {lastScanned && (
-                  <div className="px-5 pb-3 text-center">
-                    <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-green-600 bg-green-500/10 px-3 py-1 rounded-full">
-                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="20 6 9 17 4 12"/>
-                      </svg>
-                      {lastScanned}
-                    </span>
-                  </div>
-                )}
               </div>
             )}
 
@@ -400,75 +324,123 @@ export function AttendanceModal({ session, clubId, canEdit, onClose }: Props) {
                 <div className="flex flex-col items-center justify-center py-12 text-center px-6">
                   <p className="font-semibold mb-1">Keine Teilnehmer</p>
                   <p className="text-sm text-muted-foreground">
-                    Füge zuerst Teilnehmer unter dem Reiter "Teilnehmer" hinzu.
+                    Füge zuerst Teilnehmer unter dem Reiter &quot;Teilnehmer&quot; hinzu.
                   </p>
                 </div>
               ) : (
                 <div className="divide-y divide-border">
-                  {/* Show expected first, then remaining */}
-                  {(() => {
-                    const expectedIds = new Set(expectedTeilnehmer.map((t) => t.id));
-                    const remaining = teilnehmer.filter((t) => !expectedIds.has(t.id));
-
-                    return (
-                      <>
-                        {expectedTeilnehmer.length > 0 && (
-                          <>
-                            {expectedAttendance !== "open" && (
+                  {hasExpectedGroups ? (
+                    (() => {
+                      const expectedIds = new Set(expectedTeilnehmer.map((t) => t.id));
+                      const remaining = teilnehmer.filter((t) => !expectedIds.has(t.id));
+                      return (
+                        <>
+                          {/* Expected group members */}
+                          {expectedTeilnehmer.length > 0 && (
+                            <>
                               <div className="px-5 py-2 bg-secondary/30">
                                 <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
                                   Erwartet ({expectedTeilnehmer.length})
                                 </p>
                               </div>
-                            )}
-                            {expectedTeilnehmer.map((t) => (
-                              <TeilnehmerRow
-                                key={t.id}
-                                teilnehmer={t}
-                                status={attendance.get(t.id)}
-                                groups={getGroupsForTeilnehmer(t.id)}
-                                canEdit={canEdit}
-                                onToggle={() => toggleStatus(t.id, attendance.get(t.id))}
-                              />
-                            ))}
-                          </>
-                        )}
-                        {expectedAttendance !== "open" && remaining.length > 0 && (
-                          <>
-                            <div className="px-5 py-2 bg-secondary/30">
-                              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-                                Weitere ({remaining.length})
-                              </p>
-                            </div>
-                            {remaining.map((t) => (
-                              <TeilnehmerRow
-                                key={t.id}
-                                teilnehmer={t}
-                                status={attendance.get(t.id)}
-                                groups={getGroupsForTeilnehmer(t.id)}
-                                canEdit={canEdit}
-                                onToggle={() => toggleStatus(t.id, attendance.get(t.id))}
-                              />
-                            ))}
-                          </>
-                        )}
-                        {expectedAttendance === "open" && teilnehmer.map((t) => (
-                          <TeilnehmerRow
-                            key={t.id}
-                            teilnehmer={t}
-                            status={attendance.get(t.id)}
-                            groups={getGroupsForTeilnehmer(t.id)}
-                            canEdit={canEdit}
-                            onToggle={() => toggleStatus(t.id, attendance.get(t.id))}
-                          />
-                        ))}
-                      </>
-                    );
-                  })()}
+                              {expectedTeilnehmer.map((t) => (
+                                <TeilnehmerRow
+                                  key={t.id}
+                                  teilnehmer={t}
+                                  status={attendance.get(t.id)}
+                                  groups={getGroupsForTeilnehmer(t.id)}
+                                  canEdit={canEdit}
+                                  onToggle={() => toggleStatus(t.id, attendance.get(t.id))}
+                                />
+                              ))}
+                            </>
+                          )}
+
+                          {/* Weitere — collapsed by default */}
+                          {remaining.length > 0 && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => setWeitereOpen((o) => !o)}
+                                className="w-full flex items-center justify-between px-5 py-2.5 bg-secondary/20 hover:bg-secondary/40 transition-colors"
+                              >
+                                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                                  Weitere ({remaining.length})
+                                </p>
+                                <svg
+                                  width="12" height="12" viewBox="0 0 24 24" fill="none"
+                                  stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                                  className={`text-muted-foreground transition-transform duration-200 ${weitereOpen ? "rotate-180" : ""}`}
+                                >
+                                  <polyline points="6 9 12 15 18 9" />
+                                </svg>
+                              </button>
+                              {weitereOpen && remaining.map((t) => (
+                                <TeilnehmerRow
+                                  key={t.id}
+                                  teilnehmer={t}
+                                  status={attendance.get(t.id)}
+                                  groups={getGroupsForTeilnehmer(t.id)}
+                                  canEdit={canEdit}
+                                  onToggle={() => toggleStatus(t.id, attendance.get(t.id))}
+                                />
+                              ))}
+                            </>
+                          )}
+                        </>
+                      );
+                    })()
+                  ) : (
+                    /* No groups set — show everyone flat */
+                    teilnehmer.map((t) => (
+                      <TeilnehmerRow
+                        key={t.id}
+                        teilnehmer={t}
+                        status={attendance.get(t.id)}
+                        groups={getGroupsForTeilnehmer(t.id)}
+                        canEdit={canEdit}
+                        onToggle={() => toggleStatus(t.id, attendance.get(t.id))}
+                      />
+                    ))
+                  )}
                 </div>
               )}
             </div>
           </>
+        )}
+
+        {/* ── QR scan result flash ────────────────────────────── */}
+        {scanResult && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/60 rounded-t-2xl sm:rounded-2xl z-10 pointer-events-none">
+            <div className={`flex flex-col items-center gap-3 px-8 py-6 rounded-2xl shadow-2xl border ${
+              scanResult.alreadyPresent
+                ? "bg-card border-border"
+                : "bg-card border-green-500/40"
+            }`}>
+              <div className={`w-14 h-14 rounded-full flex items-center justify-center ${
+                scanResult.alreadyPresent ? "bg-amber-500/15" : "bg-green-500/15"
+              }`}>
+                {scanResult.alreadyPresent ? (
+                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-500">
+                    <circle cx="12" cy="12" r="10"/>
+                    <polyline points="20 6 9 17 4 12"/>
+                  </svg>
+                ) : (
+                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-green-500">
+                    <polyline points="20 6 9 17 4 12"/>
+                  </svg>
+                )}
+              </div>
+              <div className="text-center">
+                <p className="font-bold text-base" style={{ fontFamily: "var(--font-syne, system-ui)" }}>
+                  {scanResult.name}
+                </p>
+                <p className={`text-sm mt-0.5 ${scanResult.alreadyPresent ? "text-amber-600" : "text-green-600"}`}>
+                  {scanResult.alreadyPresent ? "Bereits eingestempelt" : "Eingestempelt ✓"}
+                </p>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </div>

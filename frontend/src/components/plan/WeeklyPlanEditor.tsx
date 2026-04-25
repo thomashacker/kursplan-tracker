@@ -5,11 +5,11 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
 import { motion, useReducedMotion } from "framer-motion";
-import type { Club, TrainingWeek, TrainingSession, Location, Profile, ClubTopic, ClubSessionType, SessionColor, VirtualTrainer } from "@/types";
+import type { Club, TrainingWeek, TrainingSession, Location, Profile, ClubTopic, ClubSessionType, SessionColor, VirtualTrainer, TeilnehmerGroup } from "@/types";
 import { DAY_NAMES, SESSION_COLORS } from "@/types";
 import { formatTime, formatWeekRange, offsetWeek, getCurrentMonday, toISODate } from "@/lib/utils/date";
 import { createClient } from "@/lib/supabase/client";
-import { SessionCard } from "./SessionCard";
+import { SessionCard, type AttendanceSummary } from "./SessionCard";
 import { SessionEditModal, type SessionSaveData } from "./SessionEditModal";
 import { AttendanceModal } from "./AttendanceModal";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -667,6 +667,67 @@ export function WeeklyPlanEditor({
   const [deleteTarget, setDeleteTarget] = useState<{ sessionId: string; templateId: string | null } | null>(null);
   const [deleteScope, setDeleteScope] = useState<"single" | "future">("single");
   const [publishModalOpen, setPublishModalOpen] = useState(false);
+  const [teilnehmerGroups, setTeilnehmerGroups] = useState<TeilnehmerGroup[]>([]);
+  const [attendanceSummaries, setAttendanceSummaries] = useState<Map<string, AttendanceSummary>>(new Map());
+  const [attendanceSummaryRevision, setAttendanceSummaryRevision] = useState(0);
+
+  // Fetch teilnehmer groups for this club (used in session expected-group picker)
+  useEffect(() => {
+    const supabase = createClient();
+    supabase.from("teilnehmer_groups").select("*").eq("club_id", club.id).order("name")
+      .then(({ data }) => { if (data) setTeilnehmerGroups(data); });
+  }, [club.id]);
+
+  // Fetch attendance summaries for all sessions in the current week
+  useEffect(() => {
+    const sessionIds = (week?.training_sessions ?? []).map((s) => s.id);
+    /* eslint-disable react-hooks/set-state-in-effect */
+    if (sessionIds.length === 0) { setAttendanceSummaries(new Map()); return; }
+    /* eslint-enable react-hooks/set-state-in-effect */
+
+    const supabase = createClient();
+    (async () => {
+      const [{ data: attendance }, { data: expectedGroups }] = await Promise.all([
+        supabase.from("session_attendance").select("session_id, status").in("session_id", sessionIds).eq("status", "present"),
+        supabase.from("session_expected_groups").select("session_id, group_id").in("session_id", sessionIds),
+      ]);
+
+      // Present count per session
+      const presentCounts = new Map<string, number>();
+      for (const a of attendance ?? []) presentCounts.set(a.session_id, (presentCounts.get(a.session_id) ?? 0) + 1);
+
+      // Group IDs per session
+      const sessionGroupIds = new Map<string, string[]>();
+      for (const eg of expectedGroups ?? []) {
+        const prev = sessionGroupIds.get(eg.session_id) ?? [];
+        sessionGroupIds.set(eg.session_id, [...prev, eg.group_id]);
+      }
+
+      // Count unique expected members per session
+      const memberCounts = new Map<string, number>();
+      const allGroupIds = [...new Set((expectedGroups ?? []).map((eg) => eg.group_id))];
+      if (allGroupIds.length > 0) {
+        const { data: members } = await supabase
+          .from("teilnehmer_group_members").select("group_id, teilnehmer_id").in("group_id", allGroupIds);
+        for (const sid of sessionIds) {
+          const gids = sessionGroupIds.get(sid) ?? [];
+          if (gids.length === 0) continue;
+          const memberSet = new Set<string>();
+          for (const m of members ?? []) { if (gids.includes(m.group_id)) memberSet.add(m.teilnehmer_id); }
+          memberCounts.set(sid, memberSet.size);
+        }
+      }
+
+      const summary = new Map<string, AttendanceSummary>();
+      for (const sid of sessionIds) {
+        const present = presentCounts.get(sid) ?? 0;
+        const hasGroups = (sessionGroupIds.get(sid) ?? []).length > 0;
+        const expected = hasGroups ? (memberCounts.get(sid) ?? 0) : null;
+        if (hasGroups || present > 0) summary.set(sid, { present, expected });
+      }
+      setAttendanceSummaries(summary);
+    })();
+  }, [week?.id, week?.training_sessions?.length, attendanceSummaryRevision]);
 
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect */
@@ -833,6 +894,19 @@ export function WeeklyPlanEditor({
 
   // Helper: batch-generate recurring sessions starting from a given week.
   // Skips weeks that already have a session from this template (idempotent).
+  async function saveExpectedGroups(
+    supabase: ReturnType<typeof createClient>,
+    sessionId: string,
+    groupIds: string[],
+  ) {
+    await supabase.from("session_expected_groups").delete().eq("session_id", sessionId);
+    if (groupIds.length > 0) {
+      await supabase.from("session_expected_groups").insert(
+        groupIds.map((gid) => ({ session_id: sessionId, group_id: gid }))
+      );
+    }
+  }
+
   async function generateRecurringSessions(
     supabase: ReturnType<typeof createClient>,
     templateId: string,
@@ -840,7 +914,7 @@ export function WeeklyPlanEditor({
       day_of_week: number; time_start: string; time_end: string;
       location_id: string | null; topics: string[]; session_types: string[];
       description: string | null; trainer_ids: string[]; virtual_trainer_ids: string[];
-      is_cancelled: boolean; color: string | null;
+      is_cancelled: boolean; color: string | null; expected_group_ids: string[];
     },
     fromWeekStart: string,
     numWeeks: number,
@@ -909,12 +983,19 @@ export function WeeklyPlanEditor({
       ]);
       if (rows.length > 0) await supabase.from("session_trainers").insert(rows);
     }
+
+    if (data.expected_group_ids.length > 0 && createdSessions) {
+      const groupRows = createdSessions.flatMap((s) =>
+        data.expected_group_ids.map((gid) => ({ session_id: s.id, group_id: gid }))
+      );
+      if (groupRows.length > 0) await supabase.from("session_expected_groups").insert(groupRows);
+    }
   }
 
   async function handleSaveSession(data: SessionSaveData) {
     suppressRealtimeRef.current = true;
     const supabase = createClient();
-    const { trainer_ids, virtual_trainer_ids, is_recurring, edit_scope, auto_extend, ...sessionData } = data;
+    const { trainer_ids, virtual_trainer_ids, is_recurring, edit_scope, auto_extend, expected_group_ids, ...sessionData } = data;
     const sessionFields = { ...sessionData, trainer_id: trainer_ids[0] ?? null };
 
     // ── Case 1: New one-off session ───────────────────────────
@@ -927,6 +1008,7 @@ export function WeeklyPlanEditor({
         .select("id").single();
       if (error) { toast.error(error.message); return; }
       await saveTrainers(supabase, created.id, trainer_ids, virtual_trainer_ids);
+      await saveExpectedGroups(supabase, created.id, expected_group_ids);
       toast.success("Sitzung erstellt.");
     }
 
@@ -970,6 +1052,7 @@ export function WeeklyPlanEditor({
         .update(sessionFields).eq("id", editingSession!.id);
       if (error) { toast.error(error.message); return; }
       await saveTrainers(supabase, editingSession!.id, trainer_ids, virtual_trainer_ids);
+      await saveExpectedGroups(supabase, editingSession!.id, expected_group_ids);
       toast.success("Gespeichert.");
     }
 
@@ -980,6 +1063,7 @@ export function WeeklyPlanEditor({
         .update({ ...sessionFields, is_modified: true }).eq("id", editingSession!.id);
       if (error) { toast.error(error.message); return; }
       await saveTrainers(supabase, editingSession!.id, trainer_ids, virtual_trainer_ids);
+      await saveExpectedGroups(supabase, editingSession!.id, expected_group_ids);
       toast.success("Diese Woche aktualisiert.");
     }
 
@@ -1038,6 +1122,15 @@ export function WeeklyPlanEditor({
           ]);
           if (trainerRows.length > 0) {
             await supabase.from("session_trainers").insert(trainerRows);
+          }
+
+          // Replace session_expected_groups for all affected sessions
+          await supabase.from("session_expected_groups").delete().in("session_id", futureIds);
+          if (expected_group_ids.length > 0) {
+            const groupRows = futureIds.flatMap((sid) =>
+              expected_group_ids.map((gid) => ({ session_id: sid, group_id: gid }))
+            );
+            await supabase.from("session_expected_groups").insert(groupRows);
           }
         }
       }
@@ -1347,7 +1440,7 @@ export function WeeklyPlanEditor({
                             <p className="text-xs text-muted-foreground/50 py-1 px-1">Kein Training</p>
                           ) : (
                             daySessions.map((session) => (
-                              <SessionCard key={session.id} session={session} trainers={trainers} virtualTrainers={virtualTrainers} canEdit={canEdit} isToday={isToday} onEdit={() => setEditingSession(session)} onDelete={() => requestDelete(session)} onAttendance={() => setAttendanceSession(session)} />
+                              <SessionCard key={session.id} session={session} trainers={trainers} virtualTrainers={virtualTrainers} canEdit={canEdit} isToday={isToday} attendanceSummary={attendanceSummaries.get(session.id)} onEdit={() => setEditingSession(session)} onDelete={() => requestDelete(session)} onAttendance={() => setAttendanceSession(session)} />
                             ))
                           )}
                         </div>
@@ -1382,7 +1475,7 @@ export function WeeklyPlanEditor({
                       </button>
                       <div className="flex-1 space-y-2">
                         {daySessions.map((session) => (
-                          <SessionCard key={session.id} session={session} trainers={trainers} virtualTrainers={virtualTrainers} canEdit={canEdit} isToday={isToday} onEdit={() => setEditingSession(session)} onDelete={() => requestDelete(session)} onAttendance={() => setAttendanceSession(session)} />
+                          <SessionCard key={session.id} session={session} trainers={trainers} virtualTrainers={virtualTrainers} canEdit={canEdit} isToday={isToday} attendanceSummary={attendanceSummaries.get(session.id)} onEdit={() => setEditingSession(session)} onDelete={() => requestDelete(session)} onAttendance={() => setAttendanceSession(session)} />
                         ))}
                         {canEdit && (
                           <button onClick={() => openNewSession(dayIndex)} className="w-full text-xs text-muted-foreground/50 border border-dashed border-border rounded-xl py-2 hover:border-primary/40 hover:text-primary transition-colors">
@@ -1416,6 +1509,7 @@ export function WeeklyPlanEditor({
           virtualTrainers={virtualTrainers}
           topics={topics}
           sessionTypes={sessionTypes}
+          teilnehmerGroups={teilnehmerGroups}
           onSave={handleSaveSession}
           onClose={() => setEditingSession(null)}
         />
@@ -1427,7 +1521,7 @@ export function WeeklyPlanEditor({
           session={attendanceSession}
           clubId={club.id}
           canEdit={canEdit}
-          onClose={() => setAttendanceSession(null)}
+          onClose={() => { setAttendanceSession(null); setAttendanceSummaryRevision((r) => r + 1); }}
         />
       )}
 

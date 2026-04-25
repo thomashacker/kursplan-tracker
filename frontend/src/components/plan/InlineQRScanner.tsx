@@ -75,8 +75,8 @@ export default function InlineQRScanner({ onScan }: Props) {
   }
 
   return (
-    <div className="relative bg-black" style={{ aspectRatio: "4/3", maxHeight: "240px" }}>
-      <video ref={videoRef} className="w-full h-full object-cover" muted playsInline />
+    <div className="relative w-full bg-black" style={{ aspectRatio: "4/3" }}>
+      <video ref={videoRef} className="absolute inset-0 w-full h-full object-cover" muted playsInline />
       {/* Viewfinder overlay */}
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
         <div className="w-36 h-36 relative">

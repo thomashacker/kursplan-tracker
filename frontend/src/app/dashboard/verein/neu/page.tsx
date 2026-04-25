@@ -100,7 +100,9 @@ export default function NeuVereinPage() {
       return;
     }
 
-    const { data: club, error } = await supabase
+    // Insert without .select() to avoid RETURNING * hitting SELECT RLS policies
+    // before the membership trigger has been evaluated in that context.
+    const { error } = await supabase
       .from("clubs")
       .insert({
         name,
@@ -108,9 +110,7 @@ export default function NeuVereinPage() {
         description: (form.get("description") as string) || null,
         is_public: isPublic,
         created_by: user.id,
-      })
-      .select()
-      .single();
+      });
 
     if (error) {
       toast.error(
@@ -119,6 +119,20 @@ export default function NeuVereinPage() {
           : error.message
       );
       setLoading(false);
+      return;
+    }
+
+    // Fetch the club in a fresh SELECT (trigger has run, membership exists)
+    const { data: club } = await supabase
+      .from("clubs")
+      .select("id, slug")
+      .eq("slug", slug)
+      .single();
+
+    if (!club) {
+      // Extremely unlikely — club was just inserted — but redirect using slug anyway
+      toast.success("Verein erstellt!");
+      router.push(`/dashboard/verein/${slug}/plan`);
       return;
     }
 
@@ -132,7 +146,7 @@ export default function NeuVereinPage() {
       );
 
     // Upload logo if selected (non-blocking — club exists regardless)
-    if (logoFile && club) {
+    if (logoFile) {
       const ext = logoFile.name.split(".").pop() ?? "jpg";
       const path = `${club.id}/logo.${ext}`;
       const { error: uploadError } = await supabase.storage
