@@ -1021,6 +1021,27 @@ export function WeeklyPlanEditor({
       if (error) { toast.error(error.message); return; }
       await saveTrainers(supabase, created.id, trainer_ids, virtual_trainer_ids);
       await saveExpectedGroups(supabase, created.id, expected_group_ids);
+      setWeek((w) => w ? {
+        ...w,
+        training_sessions: [
+          ...(w.training_sessions ?? []),
+          {
+            id: created.id, week_id: weekId,
+            day_of_week: data.day_of_week, time_start: data.time_start, time_end: data.time_end,
+            topics: data.topics, session_types: data.session_types,
+            description: data.description, location_id: data.location_id,
+            locations: locations.find((l) => l.id === data.location_id),
+            trainer_id: trainer_ids[0] ?? null, is_cancelled: data.is_cancelled,
+            color: data.color, template_id: null, is_modified: false,
+            session_trainers: [
+              ...trainer_ids.map((uid) => ({ session_id: created.id, user_id: uid, virtual_trainer_id: null })),
+              ...virtual_trainer_ids.map((vid) => ({ session_id: created.id, user_id: null, virtual_trainer_id: vid })),
+            ],
+            topic: null, tags: [], notes: null, guest_trainers: [],
+            created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+          },
+        ],
+      } : w);
       toast.success("Sitzung erstellt.");
     }
 
@@ -1059,23 +1080,41 @@ export function WeeklyPlanEditor({
 
     // ── Case 3: Edit non-recurring session ───────────────────
     else if (editingSession !== "new" && !editingSession?.template_id) {
-      const { error } = await supabase
-        .from("training_sessions")
-        .update(sessionFields).eq("id", editingSession!.id);
+      const sid = editingSession!.id;
+      const { error } = await supabase.from("training_sessions").update(sessionFields).eq("id", sid);
       if (error) { toast.error(error.message); return; }
-      await saveTrainers(supabase, editingSession!.id, trainer_ids, virtual_trainer_ids);
-      await saveExpectedGroups(supabase, editingSession!.id, expected_group_ids);
+      await saveTrainers(supabase, sid, trainer_ids, virtual_trainer_ids);
+      await saveExpectedGroups(supabase, sid, expected_group_ids);
+      setWeek((w) => w ? { ...w, training_sessions: (w.training_sessions ?? []).map((s) =>
+        s.id !== sid ? s : { ...s, ...sessionFields,
+          topics: data.topics, session_types: data.session_types, color: data.color,
+          locations: locations.find((l) => l.id === data.location_id),
+          session_trainers: [
+            ...trainer_ids.map((uid) => ({ session_id: sid, user_id: uid, virtual_trainer_id: null })),
+            ...virtual_trainer_ids.map((vid) => ({ session_id: sid, user_id: null, virtual_trainer_id: vid })),
+          ],
+        }
+      ) } : w);
       toast.success("Gespeichert.");
     }
 
     // ── Case 4: Edit recurring — only this week ───────────────
     else if (editingSession !== "new" && edit_scope === "single") {
-      const { error } = await supabase
-        .from("training_sessions")
-        .update({ ...sessionFields, is_modified: true }).eq("id", editingSession!.id);
+      const sid = editingSession!.id;
+      const { error } = await supabase.from("training_sessions").update({ ...sessionFields, is_modified: true }).eq("id", sid);
       if (error) { toast.error(error.message); return; }
-      await saveTrainers(supabase, editingSession!.id, trainer_ids, virtual_trainer_ids);
-      await saveExpectedGroups(supabase, editingSession!.id, expected_group_ids);
+      await saveTrainers(supabase, sid, trainer_ids, virtual_trainer_ids);
+      await saveExpectedGroups(supabase, sid, expected_group_ids);
+      setWeek((w) => w ? { ...w, training_sessions: (w.training_sessions ?? []).map((s) =>
+        s.id !== sid ? s : { ...s, ...sessionFields, is_modified: true,
+          topics: data.topics, session_types: data.session_types, color: data.color,
+          locations: locations.find((l) => l.id === data.location_id),
+          session_trainers: [
+            ...trainer_ids.map((uid) => ({ session_id: sid, user_id: uid, virtual_trainer_id: null })),
+            ...virtual_trainer_ids.map((vid) => ({ session_id: sid, user_id: null, virtual_trainer_id: vid })),
+          ],
+        }
+      ) } : w);
       toast.success("Diese Woche aktualisiert.");
     }
 
@@ -1196,6 +1235,7 @@ export function WeeklyPlanEditor({
     );
     setHasChanges(true);
     setDeleteTarget(null);
+    startTransition(() => router.refresh());
   }
 
   // Month view: clicking a day navigates to that week and opens day drill-down

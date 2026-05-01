@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { createClient } from "@/lib/supabase/client";
 import type { Teilnehmer, TeilnehmerGroup, TeilnehmerQRPayload } from "@/types";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const QRCodeCanvas = dynamic(() => import("./QRCodeCanvas"), { ssr: false });
 const QRScannerModal = dynamic(() => import("./QRScannerModal"), { ssr: false });
@@ -343,9 +344,32 @@ export default function TeilnehmerPage() {
   // ── Loading / access guard ─────────────────────────────────────────────────
   if (loading) {
     return (
-      <div className="flex items-center gap-3 text-muted-foreground py-16 justify-center">
-        <span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-        Wird geladen…
+      <div className="space-y-5">
+        <div className="flex items-center justify-between">
+          <Skeleton className="h-8 w-32 rounded" />
+          <Skeleton className="h-9 w-36 rounded-xl" />
+        </div>
+        <div className="grid sm:grid-cols-2 gap-4">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="rounded-2xl border border-border bg-card p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Skeleton className="w-3 h-3 rounded-full" />
+                  <Skeleton className="h-4 w-28 rounded" />
+                </div>
+                <Skeleton className="h-6 w-12 rounded-full" />
+              </div>
+              <div className="space-y-2">
+                {[0, 1, 2].map((j) => (
+                  <div key={j} className="flex items-center gap-2">
+                    <Skeleton className="w-7 h-7 rounded-full shrink-0" />
+                    <Skeleton className="h-3 flex-1 max-w-[160px] rounded" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     );
   }

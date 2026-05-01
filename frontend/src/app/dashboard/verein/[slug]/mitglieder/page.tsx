@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useParams } from "next/navigation";
 import { toast } from "sonner";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
@@ -41,6 +42,7 @@ function RoleBadge({ role }: { role: Role }) {
 export default function MitgliederPage() {
   const params = useParams<{ slug: string }>();
   const reduced = useReducedMotion();
+  const [isLoading, setIsLoading] = useState(true);
   const [club, setClub] = useState<Club | null>(null);
   const [memberships, setMemberships] = useState<ClubMembership[]>([]);
   const [pendingInvites, setPendingInvites] = useState<Invitation[]>([]);
@@ -129,6 +131,7 @@ export default function MitgliederPage() {
     }));
 
     setMemberships(merged);
+    setIsLoading(false);
   }
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -288,6 +291,29 @@ export default function MitgliederPage() {
   }
 
   const isAdmin = myRole === "admin";
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <Skeleton className="h-8 w-28 rounded" />
+          <Skeleton className="h-10 w-32 rounded-xl" />
+        </div>
+        <div className="space-y-2">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="flex items-center gap-3 px-4 py-3 rounded-xl border border-border bg-card">
+              <Skeleton className="w-9 h-9 rounded-full shrink-0" />
+              <div className="flex-1 min-w-0 space-y-1.5">
+                <Skeleton className="h-3.5 w-32 rounded" />
+                <Skeleton className="h-3 w-44 rounded" />
+              </div>
+              <Skeleton className="shrink-0 h-5 w-16 rounded-full" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
