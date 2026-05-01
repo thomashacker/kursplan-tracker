@@ -2,7 +2,6 @@
 
 import { useState, useTransition, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { toast } from "sonner";
 import { motion, useReducedMotion } from "framer-motion";
 import type { Club, TrainingWeek, TrainingSession, Location, Profile, ClubTopic, ClubSessionType, SessionColor, VirtualTrainer, TeilnehmerGroup } from "@/types";
