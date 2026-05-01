@@ -118,6 +118,15 @@
   }
 }
 
+/* Indeterminate progress bar animation */
+@keyframes progress-indeterminate {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+.animate-progress {
+  animation: progress-indeterminate 1.4s ease-in-out infinite;
+}
+
 /* Dot-grid background utility */
 .bg-dot-grid {
   background-image: radial-gradient(

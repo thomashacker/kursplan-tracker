@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { motion, useReducedMotion } from "framer-motion";
@@ -68,6 +68,7 @@ function Toggle({
 export function ClubSettingsForm({ club }: { club: Club }) {
   const router = useRouter();
   const reduced = useReducedMotion();
+  const [, startTransition] = useTransition();
 
   // ── Delete club ───────────────────────────────────────────
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -177,7 +178,7 @@ export function ClubSettingsForm({ club }: { club: Club }) {
       toast.error(error.message);
     } else {
       toast.success("Einstellungen gespeichert.");
-      router.refresh();
+      startTransition(() => router.refresh());
     }
     setSaving(false);
   }

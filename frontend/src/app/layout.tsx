@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Syne, DM_Sans } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/sonner";
+import NextTopLoader from "nextjs-toploader";
 
 const syne = Syne({
   subsets: ["latin"],
@@ -28,6 +29,7 @@ export default function RootLayout({
   return (
     <html lang="de" className={`${syne.variable} ${dmSans.variable}`}>
       <body className="min-h-screen bg-background text-foreground antialiased">
+        <NextTopLoader color="oklch(0.55 0.22 28)" height={2} showSpinner={false} shadow={false} />
         {children}
         <Toaster richColors />
       </body>

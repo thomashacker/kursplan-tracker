@@ -661,7 +661,7 @@ export function WeeklyPlanEditor({
   const [hasChanges, setHasChanges] = useState(false);
   const [hasRemoteChanges, setHasRemoteChanges] = useState(false);
   const suppressRealtimeRef = useRef(false);
-  const [, startTransition] = useTransition();
+  const [isRefreshing, startTransition] = useTransition();
 
   // Delete confirm dialog state
   const [deleteTarget, setDeleteTarget] = useState<{ sessionId: string; templateId: string | null } | null>(null);
@@ -1215,7 +1215,15 @@ export function WeeklyPlanEditor({
   }
 
   return (
-    <div>
+    <div className="relative">
+      {/* ── Refresh progress bar ─────────────────────────── */}
+      <div
+        className={`absolute -top-2 left-0 right-0 h-0.5 bg-primary/20 rounded-full overflow-hidden transition-opacity duration-300 ${isRefreshing ? "opacity-100" : "opacity-0"}`}
+        aria-hidden
+      >
+        <div className="h-full w-1/3 bg-primary rounded-full animate-progress" />
+      </div>
+
       {/* ── Remote changes banner ─────────────────────────── */}
       {hasRemoteChanges && (
         <motion.div
