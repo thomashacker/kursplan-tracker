@@ -1343,17 +1343,21 @@ export function WeeklyPlanEditor({
                     </svg>
                   </button>
 
-                  <Link
-                    href={`/verein/${club.slug}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const url = `${window.location.origin}/verein/${club.slug}`;
+                      navigator.clipboard.writeText(url).catch(() => {});
+                      toast.success("Link kopiert!");
+                      router.push(`/verein/${club.slug}`);
+                    }}
                     className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 h-8 px-3 rounded-lg border border-border text-xs font-medium text-muted-foreground hover:border-primary/40 hover:text-primary transition-colors"
                   >
                     Öffentliche Ansicht
                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+                      <path d="M5 12h14M12 5l7 7-7 7" />
                     </svg>
-                  </Link>
+                  </button>
                 </div>
 
                 <Dialog open={publishModalOpen} onOpenChange={setPublishModalOpen}>
