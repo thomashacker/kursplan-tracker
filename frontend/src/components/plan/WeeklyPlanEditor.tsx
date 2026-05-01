@@ -668,14 +668,26 @@ export function WeeklyPlanEditor({
   const [deleteScope, setDeleteScope] = useState<"single" | "future">("single");
   const [publishModalOpen, setPublishModalOpen] = useState(false);
   const [teilnehmerGroups, setTeilnehmerGroups] = useState<TeilnehmerGroup[]>([]);
+  const [groupMemberCounts, setGroupMemberCounts] = useState<Record<string, number>>({});
   const [attendanceSummaries, setAttendanceSummaries] = useState<Map<string, AttendanceSummary>>(new Map());
   const [attendanceSummaryRevision, setAttendanceSummaryRevision] = useState(0);
 
-  // Fetch teilnehmer groups for this club (used in session expected-group picker)
+  // Fetch teilnehmer groups + member counts for this club (used in session expected-group picker)
   useEffect(() => {
     const supabase = createClient();
-    supabase.from("teilnehmer_groups").select("*").eq("club_id", club.id).order("name")
-      .then(({ data }) => { if (data) setTeilnehmerGroups(data); });
+    Promise.all([
+      supabase.from("teilnehmer_groups").select("*").eq("club_id", club.id).order("name"),
+      supabase.from("teilnehmer_group_members").select("group_id").eq("club_id", club.id),
+    ]).then(([{ data: groups }, { data: members }]) => {
+      if (groups) setTeilnehmerGroups(groups);
+      if (members) {
+        const counts: Record<string, number> = {};
+        for (const m of members) {
+          counts[m.group_id] = (counts[m.group_id] ?? 0) + 1;
+        }
+        setGroupMemberCounts(counts);
+      }
+    });
   }, [club.id]);
 
   // Fetch attendance summaries for all sessions in the current week
@@ -1265,28 +1277,36 @@ export function WeeklyPlanEditor({
             */}
             {week && isAdmin && (
               <>
-                <button
-                  onClick={() => setPublishModalOpen(true)}
-                  className={`h-8 px-3 rounded-lg text-xs font-medium transition-colors ${
-                    week.is_published
-                      ? "border border-border hover:bg-secondary"
-                      : "bg-primary text-primary-foreground hover:opacity-90 font-semibold"
-                  }`}
-                >
-                  {week.is_published ? "Unveröffentlichen" : "Veröffentlichen"}
-                </button>
+                {/* On mobile these two buttons span the full toolbar width side-by-side;
+                    on sm+ they shrink back to auto-sized inline buttons. */}
+                <div className="flex gap-2 w-full sm:w-auto">
+                  <button
+                    onClick={() => setPublishModalOpen(true)}
+                    className={`flex-1 sm:flex-none h-8 px-3 rounded-lg text-xs font-medium transition-colors inline-flex items-center justify-center gap-1.5 ${
+                      week.is_published
+                        ? "bg-green-500/10 text-green-700 dark:text-green-400 border border-green-500/25 hover:bg-green-500/20"
+                        : "bg-primary text-primary-foreground hover:opacity-90 font-semibold"
+                    }`}
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${week.is_published ? "bg-green-500" : "bg-primary-foreground/60"}`} />
+                    {week.is_published ? "Veröffentlicht" : "Entwurf"}
+                    <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="opacity-50 shrink-0">
+                      <path d="M2 4l4 4 4-4"/>
+                    </svg>
+                  </button>
 
-                <Link
-                  href={`/verein/${club.slug}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-border text-xs font-medium text-muted-foreground hover:border-primary/40 hover:text-primary transition-colors"
-                >
-                  Öffentliche Ansicht
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
-                  </svg>
-                </Link>
+                  <Link
+                    href={`/verein/${club.slug}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 h-8 px-3 rounded-lg border border-border text-xs font-medium text-muted-foreground hover:border-primary/40 hover:text-primary transition-colors"
+                  >
+                    Öffentliche Ansicht
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+                    </svg>
+                  </Link>
+                </div>
 
                 <Dialog open={publishModalOpen} onOpenChange={setPublishModalOpen}>
                   <DialogContent className="max-w-sm">
@@ -1339,12 +1359,6 @@ export function WeeklyPlanEditor({
               <button onClick={handleDiscardChanges} className="h-8 px-3 rounded-lg border border-border text-xs font-medium text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors">
                 Änderungen verwerfen
               </button>
-            )}
-            {week && (
-              <span className={`inline-flex items-center gap-1 text-xs font-medium ${week.is_published ? "text-green-600" : "text-muted-foreground"}`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${week.is_published ? "bg-green-500" : "bg-muted-foreground/40"}`} />
-                {week.is_published ? "Veröffentlicht" : "Entwurf"}
-              </span>
             )}
           </div>
         )}
@@ -1510,6 +1524,7 @@ export function WeeklyPlanEditor({
           topics={topics}
           sessionTypes={sessionTypes}
           teilnehmerGroups={teilnehmerGroups}
+          groupMemberCounts={groupMemberCounts}
           onSave={handleSaveSession}
           onClose={() => setEditingSession(null)}
         />

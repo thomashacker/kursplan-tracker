@@ -52,6 +52,7 @@ interface Props {
   topics: ClubTopic[];
   sessionTypes: ClubSessionType[];
   teilnehmerGroups?: TeilnehmerGroup[];
+  groupMemberCounts?: Record<string, number>;
   onSave: (data: SessionSaveData) => Promise<void>;
   onClose: () => void;
 }
@@ -99,33 +100,6 @@ function MultiTagSelect({
       <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
         {label}
       </Label>
-
-      {/* Selected tags */}
-      {selected.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 mb-1">
-          {selected.map((id) => {
-            const opt = options.find((o) => o.id === id);
-            return (
-              <span
-                key={id}
-                className="inline-flex items-center gap-1 h-6 pl-2.5 pr-1.5 rounded-full text-xs font-medium bg-primary/10 text-primary border border-primary/20"
-              >
-                {opt?.label ?? id}
-                <button
-                  type="button"
-                  onClick={() => onRemove(id)}
-                  className="flex items-center justify-center w-3.5 h-3.5 rounded-full hover:bg-primary/20 transition-colors"
-                  aria-label={`${opt?.label ?? id} entfernen`}
-                >
-                  <svg width="7" height="7" viewBox="0 0 8 8" fill="none">
-                    <path d="M1 1l6 6M7 1L1 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                  </svg>
-                </button>
-              </span>
-            );
-          })}
-        </div>
-      )}
 
       {/* Dropdown trigger + menu */}
       {options.length === 0 ? (
@@ -175,6 +149,33 @@ function MultiTagSelect({
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Selected tags — shown below the trigger */}
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 pt-0.5">
+          {selected.map((id) => {
+            const opt = options.find((o) => o.id === id);
+            return (
+              <span
+                key={id}
+                className="inline-flex items-center gap-1 h-6 pl-2.5 pr-1.5 rounded-full text-xs font-medium bg-primary/10 text-primary border border-primary/20"
+              >
+                {opt?.label ?? id}
+                <button
+                  type="button"
+                  onClick={() => onRemove(id)}
+                  className="flex items-center justify-center w-3.5 h-3.5 rounded-full hover:bg-primary/20 transition-colors"
+                  aria-label={`${opt?.label ?? id} entfernen`}
+                >
+                  <svg width="7" height="7" viewBox="0 0 8 8" fill="none">
+                    <path d="M1 1l6 6M7 1L1 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                  </svg>
+                </button>
+              </span>
+            );
+          })}
         </div>
       )}
     </div>
@@ -228,33 +229,6 @@ function UnifiedTrainerSelect({
         Trainer
       </Label>
 
-      {selected.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 mb-1">
-          {selected.map((id) => (
-            <span
-              key={id}
-              className={`inline-flex items-center gap-1 h-6 pl-2.5 pr-1.5 rounded-full text-xs font-medium border ${
-                vtIds.has(id)
-                  ? "bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 border-indigo-500/20"
-                  : "bg-primary/10 text-primary border-primary/20"
-              }`}
-            >
-              {labelFor(id)}
-              <button
-                type="button"
-                onClick={() => onRemove(id)}
-                className="flex items-center justify-center w-3.5 h-3.5 rounded-full hover:bg-black/10 transition-colors"
-                aria-label={`${labelFor(id)} entfernen`}
-              >
-                <svg width="7" height="7" viewBox="0 0 8 8" fill="none">
-                  <path d="M1 1l6 6M7 1L1 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                </svg>
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
-
       {allOptions.length === 0 ? (
         <div className="flex items-center justify-between gap-2 py-0.5">
           <p className="text-xs text-muted-foreground">Noch keine Trainer — Mitglieder mit Trainer-Rolle erscheinen hier.</p>
@@ -302,6 +276,34 @@ function UnifiedTrainerSelect({
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Selected trainer chips — shown below the trigger */}
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 pt-0.5">
+          {selected.map((id) => (
+            <span
+              key={id}
+              className={`inline-flex items-center gap-1 h-6 pl-2.5 pr-1.5 rounded-full text-xs font-medium border ${
+                vtIds.has(id)
+                  ? "bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 border-indigo-500/20"
+                  : "bg-primary/10 text-primary border-primary/20"
+              }`}
+            >
+              {labelFor(id)}
+              <button
+                type="button"
+                onClick={() => onRemove(id)}
+                className="flex items-center justify-center w-3.5 h-3.5 rounded-full hover:bg-black/10 transition-colors"
+                aria-label={`${labelFor(id)} entfernen`}
+              >
+                <svg width="7" height="7" viewBox="0 0 8 8" fill="none">
+                  <path d="M1 1l6 6M7 1L1 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                </svg>
+              </button>
+            </span>
+          ))}
         </div>
       )}
     </div>
@@ -392,12 +394,14 @@ function GroupMultiSelect({
   onAdd,
   onRemove,
   emptyHref,
+  groupMemberCounts,
 }: {
   groups: TeilnehmerGroup[];
   selected: string[];
   onAdd: (id: string) => void;
   onRemove: (id: string) => void;
   emptyHref?: string;
+  groupMemberCounts?: Record<string, number>;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -412,41 +416,13 @@ function GroupMultiSelect({
 
   const selectedGroups = groups.filter((g) => selected.includes(g.id));
   const available = groups.filter((g) => !selected.includes(g.id));
+  const hasEmptyGroup = selectedGroups.some((g) => (groupMemberCounts?.[g.id] ?? -1) === 0);
 
   return (
     <div className="space-y-1.5">
       <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
         Erwartete Gruppen
       </Label>
-
-      {selectedGroups.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 mb-1">
-          {selectedGroups.map((g) => (
-            <span
-              key={g.id}
-              className="inline-flex items-center gap-1.5 h-6 pl-2 pr-1.5 rounded-full text-xs font-medium border"
-              style={{
-                backgroundColor: `${g.color ?? "#94a3b8"}20`,
-                color: g.color ?? "#94a3b8",
-                borderColor: `${g.color ?? "#94a3b8"}40`,
-              }}
-            >
-              <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: g.color ?? "#94a3b8" }} />
-              {g.name}
-              <button
-                type="button"
-                onClick={() => onRemove(g.id)}
-                className="flex items-center justify-center w-3.5 h-3.5 rounded-full hover:bg-black/10 transition-colors"
-                aria-label={`${g.name} entfernen`}
-              >
-                <svg width="7" height="7" viewBox="0 0 8 8" fill="none">
-                  <path d="M1 1l6 6M7 1L1 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                </svg>
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
 
       {groups.length === 0 ? (
         <div className="flex items-center justify-between gap-2 py-0.5">
@@ -498,6 +474,53 @@ function GroupMultiSelect({
           )}
         </div>
       )}
+
+      {/* Selected group chips — shown below the trigger */}
+      {selectedGroups.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 pt-0.5">
+          {selectedGroups.map((g) => (
+            <span
+              key={g.id}
+              className="inline-flex items-center gap-1.5 h-6 pl-2 pr-1.5 rounded-full text-xs font-medium border"
+              style={{
+                backgroundColor: `${g.color ?? "#94a3b8"}20`,
+                color: g.color ?? "#94a3b8",
+                borderColor: `${g.color ?? "#94a3b8"}40`,
+              }}
+            >
+              <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: g.color ?? "#94a3b8" }} />
+              {g.name}
+              <button
+                type="button"
+                onClick={() => onRemove(g.id)}
+                className="flex items-center justify-center w-3.5 h-3.5 rounded-full hover:bg-black/10 transition-colors"
+                aria-label={`${g.name} entfernen`}
+              >
+                <svg width="7" height="7" viewBox="0 0 8 8" fill="none">
+                  <path d="M1 1l6 6M7 1L1 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                </svg>
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Warning: selected group has no members */}
+      {hasEmptyGroup && (
+        <div className="flex items-start gap-2 rounded-xl border border-amber-300/60 dark:border-amber-700/40 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 mt-0.5">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+          <span>
+            Eine Gruppe hat noch keine Teilnehmer — Anwesenheit kann nicht erfasst werden.{" "}
+            {emptyHref && (
+              <a href={emptyHref} className="font-medium underline underline-offset-2 hover:opacity-80">
+                Teilnehmer hinzufügen
+              </a>
+            )}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -513,6 +536,7 @@ export function SessionEditModal({
   topics,
   sessionTypes,
   teilnehmerGroups = [],
+  groupMemberCounts,
   onSave,
   onClose,
 }: Props) {
@@ -585,7 +609,7 @@ export function SessionEditModal({
       trainer_ids: selectedAllTrainerIds.filter((id) => !vtIdSet.has(id)),
       virtual_trainer_ids: selectedAllTrainerIds.filter((id) => vtIdSet.has(id)),
       is_cancelled: isCancelled,
-      is_recurring: isNew ? makeRecurring : false,
+      is_recurring: (isNew || !isRecurring) ? makeRecurring : false,
       edit_scope: editScope,
       auto_extend: autoExtend,
       color: selectedColor,
@@ -669,7 +693,7 @@ export function SessionEditModal({
 
         <form onSubmit={handleSubmit} className="space-y-4 pt-1">
           {/* Color picker */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center justify-center gap-2">
             {(Object.entries(SESSION_COLORS) as [SessionColor, typeof SESSION_COLORS[SessionColor]][]).map(([key, cfg]) => {
               const active = (selectedColor ?? "neutral") === key;
               return (
@@ -694,8 +718,8 @@ export function SessionEditModal({
           </div>
 
           {/* Row: Day + Time */}
-          <div className="grid grid-cols-3 gap-3">
-            <div className="space-y-1.5 col-span-1">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <div className="space-y-1.5 col-span-2 sm:col-span-1">
               <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Wochentag</Label>
               <Select value={String(dayOfWeek)} onValueChange={(v) => v !== null && setDayOfWeek(Number(v))}>
                 <SelectTrigger className="h-10 w-full rounded-xl">
@@ -793,6 +817,7 @@ export function SessionEditModal({
             onAdd={(id) => setSelectedGroupIds((prev) => prev.includes(id) ? prev : [...prev, id])}
             onRemove={(id) => setSelectedGroupIds((prev) => prev.filter((x) => x !== id))}
             emptyHref={teilnehmerHref}
+            groupMemberCounts={groupMemberCounts}
           />
 
           {/* Description */}
@@ -810,12 +835,12 @@ export function SessionEditModal({
             />
           </div>
 
-          {/* Recurring toggle — new sessions only */}
-          {isNew && (
+          {/* Recurring toggle — new sessions + existing non-recurring sessions */}
+          {(isNew || !isRecurring) && (
             <div className="space-y-2">
               <ToggleRow
                 title="Wöchentlich wiederholen"
-                description="Erstellt diese Sitzung für die nächsten 8 Wochen."
+                description={isNew ? "Erstellt diese Sitzung für die nächsten 8 Wochen." : "Konvertiert diese Sitzung in eine wöchentlich wiederkehrende Einheit."}
                 checked={makeRecurring}
                 onChange={(v) => { setMakeRecurring(v); if (!v) setAutoExtend(false); }}
               />
@@ -886,7 +911,7 @@ export function SessionEditModal({
             <button type="submit" disabled={saving} className="h-10 px-5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold disabled:opacity-40 hover:opacity-90 transition-opacity">
               {saving
                 ? "Speichern…"
-                : isNew && makeRecurring
+                : makeRecurring && (isNew || !isRecurring)
                 ? "Erstellen (8 Wochen)"
                 : editScope === "future" && isRecurring
                 ? "Alle zukünftigen aktualisieren"
