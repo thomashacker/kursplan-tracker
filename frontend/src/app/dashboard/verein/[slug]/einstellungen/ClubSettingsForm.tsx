@@ -100,6 +100,9 @@ export function ClubSettingsForm({ club }: { club: Club }) {
 
   // ── General ───────────────────────────────────────────────
   const [isPublic, setIsPublic] = useState(club.is_public);
+  const [showTrainersPublic, setShowTrainersPublic] = useState(
+    (club.settings?.show_trainers_public as boolean | undefined) ?? true
+  );
   const [saving, setSaving] = useState(false);
 
   async function purgeLogoFolder(supabase: ReturnType<typeof createClient>) {
@@ -166,6 +169,7 @@ export function ClubSettingsForm({ club }: { club: Club }) {
         name: form.get("name") as string,
         description: (form.get("description") as string) || null,
         is_public: isPublic,
+        settings: { ...club.settings, show_trainers_public: showTrainersPublic },
       })
       .eq("id", club.id);
 
@@ -293,6 +297,13 @@ export function ClubSettingsForm({ club }: { club: Club }) {
             onChange={setIsPublic}
             label="Trainingsplan öffentlich"
             description="Jeder kann den Plan ohne Login einsehen."
+          />
+
+          <Toggle
+            checked={showTrainersPublic}
+            onChange={setShowTrainersPublic}
+            label="Trainer in öffentlicher Ansicht anzeigen"
+            description="Wenn deaktiviert, werden Trainernamen auf der öffentlichen Seite ausgeblendet."
           />
 
           <SaveButton loading={saving} />

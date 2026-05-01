@@ -47,14 +47,25 @@ export default async function PublicPlanPage({
     .from("clubs").select("*").eq("slug", slug).single<Club>();
   if (!club) notFound();
 
+  const { data: { user } } = await supabase.auth.getUser();
+
   if (!club.is_public) {
-    const { data: { user } } = await supabase.auth.getUser();
     if (!user) notFound();
     const { data: membership } = await supabase
       .from("club_memberships").select("id")
       .eq("club_id", club.id).eq("user_id", user.id).eq("status", "active").single();
     if (!membership) notFound();
   }
+
+  // Check if the authenticated user is a member of this club (for the dashboard button)
+  const { data: userMembership } = user
+    ? await supabase
+        .from("club_memberships").select("role")
+        .eq("club_id", club.id).eq("user_id", user.id).eq("status", "active").single()
+    : { data: null };
+  const dashboardHref = userMembership ? `/dashboard/verein/${slug}` : null;
+
+  const showTrainers = (club.settings?.show_trainers_public as boolean | undefined) ?? true;
 
   const monday = getCurrentMonday();
   const until  = offsetWeek(monday, 9);
@@ -69,39 +80,44 @@ export default async function PublicPlanPage({
     .order("week_start", { ascending: true })
     .returns<TrainingWeek[]>();
 
-  // Resolve trainer names
+  // Resolve trainer names (skip entirely when admin has hidden trainers from public view)
   const allSessions = (weeks ?? []).flatMap((w) => w.training_sessions ?? []);
 
   type RawST = { user_id: string | null; virtual_trainer_id: string | null };
 
-  const allTrainerIds = [...new Set(
-    allSessions.flatMap((s) =>
-      s.session_trainers
-        ? (s.session_trainers as RawST[]).filter((st) => st.user_id).map((st) => st.user_id!)
-        : (s.trainer_id ? [s.trainer_id] : [])
-    )
-  )];
-  const allVirtualTrainerIds = [...new Set(
-    allSessions.flatMap((s) =>
-      (s.session_trainers as RawST[] | undefined ?? []).filter((st) => st.virtual_trainer_id).map((st) => st.virtual_trainer_id!)
-    )
-  )];
+  let profileMap: Record<string, { name: string; avatarUrl: string | null }> = {};
+  let virtualProfileMap: Record<string, { name: string; avatarUrl: string | null }> = {};
 
-  const [{ data: trainerProfiles }, { data: virtualTrainerProfiles }] = await Promise.all([
-    allTrainerIds.length
-      ? supabase.from("profiles").select("id, full_name, avatar_url").in("id", allTrainerIds)
-      : Promise.resolve({ data: [] }),
-    allVirtualTrainerIds.length
-      ? supabase.from("virtual_trainers").select("id, name, avatar_url").in("id", allVirtualTrainerIds)
-      : Promise.resolve({ data: [] }),
-  ]);
+  if (showTrainers) {
+    const allTrainerIds = [...new Set(
+      allSessions.flatMap((s) =>
+        s.session_trainers
+          ? (s.session_trainers as RawST[]).filter((st) => st.user_id).map((st) => st.user_id!)
+          : (s.trainer_id ? [s.trainer_id] : [])
+      )
+    )];
+    const allVirtualTrainerIds = [...new Set(
+      allSessions.flatMap((s) =>
+        (s.session_trainers as RawST[] | undefined ?? []).filter((st) => st.virtual_trainer_id).map((st) => st.virtual_trainer_id!)
+      )
+    )];
 
-  const profileMap = Object.fromEntries(
-    (trainerProfiles ?? []).map((p) => [p.id, { name: p.full_name as string, avatarUrl: p.avatar_url as string | null }])
-  );
-  const virtualProfileMap = Object.fromEntries(
-    (virtualTrainerProfiles ?? []).map((vt) => [vt.id, { name: vt.name as string, avatarUrl: vt.avatar_url as string | null }])
-  );
+    const [{ data: trainerProfiles }, { data: virtualTrainerProfiles }] = await Promise.all([
+      allTrainerIds.length
+        ? supabase.from("profiles").select("id, full_name, avatar_url").in("id", allTrainerIds)
+        : Promise.resolve({ data: [] }),
+      allVirtualTrainerIds.length
+        ? supabase.from("virtual_trainers").select("id, name, avatar_url").in("id", allVirtualTrainerIds)
+        : Promise.resolve({ data: [] }),
+    ]);
+
+    profileMap = Object.fromEntries(
+      (trainerProfiles ?? []).map((p) => [p.id, { name: p.full_name as string, avatarUrl: p.avatar_url as string | null }])
+    );
+    virtualProfileMap = Object.fromEntries(
+      (virtualTrainerProfiles ?? []).map((vt) => [vt.id, { name: vt.name as string, avatarUrl: vt.avatar_url as string | null }])
+    );
+  }
 
   // Build serializable flat list
   const now = new Date();
@@ -161,19 +177,34 @@ export default async function PublicPlanPage({
   const filterOptions = {
     types:     [...new Set(active.flatMap((s) => s.sessionTypes))].sort(),
     topics:    [...new Set(active.flatMap((s) => s.topics))].sort(),
-    trainers:  [...new Set(active.flatMap((s) => s.trainerNames))].sort(),
+    // Omit trainer filter when trainers are hidden on the public view
+    trainers:  showTrainers ? [...new Set(active.flatMap((s) => s.trainerNames))].sort() : [],
     locations: [...new Set(active.flatMap((s) => s.location ? [s.location.name] : []))].sort(),
   };
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <header className="border-b bg-background">
-        <div className="container max-w-2xl mx-auto px-4 py-5">
-          <h1 className="text-2xl font-bold" style={{ fontFamily: "var(--font-syne, system-ui)" }}>
-            {club.name}
-          </h1>
-          {club.description && (
-            <p className="text-muted-foreground text-sm mt-1">{club.description}</p>
+        <div className="container max-w-2xl mx-auto px-4 py-5 flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold" style={{ fontFamily: "var(--font-syne, system-ui)" }}>
+              {club.name}
+            </h1>
+            {club.description && (
+              <p className="text-muted-foreground text-sm mt-1">{club.description}</p>
+            )}
+          </div>
+          {dashboardHref && (
+            <a
+              href={dashboardHref}
+              className="shrink-0 inline-flex items-center gap-1.5 h-9 px-3.5 rounded-xl border border-border text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+                <rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>
+              </svg>
+              Dashboard
+            </a>
           )}
         </div>
       </header>

@@ -497,7 +497,10 @@ export default function PublicPlanClient({
                       <p className={`font-bold leading-tight mb-2 ${nextConcurrent.length > 1 ? "text-lg" : "text-2xl mb-3"}`} style={{ fontFamily: "var(--font-syne, system-ui)" }}>
                         {[...s.topics, ...s.sessionTypes].join(" · ") || "Training"}
                       </p>
-                      {(s.topics.length > 0 || s.sessionTypes.length > 0) && (
+                      {/* Only show chips when both topics AND types exist — chips then add value by
+                          visually distinguishing the two. When only one dimension is present the
+                          title already covers it and chips would just repeat the same text. */}
+                      {s.topics.length > 0 && s.sessionTypes.length > 0 && (
                         <div className="flex flex-wrap gap-1.5 mb-3">
                           {s.topics.map((t) => <span key={t} className="text-xs font-semibold px-2.5 py-1 rounded-full bg-primary/15 text-primary border border-primary/20">{t}</span>)}
                           {s.sessionTypes.map((t) => <span key={t} className="text-xs font-medium px-2.5 py-1 rounded-full bg-secondary text-secondary-foreground">{t}</span>)}
