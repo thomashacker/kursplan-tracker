@@ -37,7 +37,7 @@ interface Props {
   sessionTypes: ClubSessionType[];
 }
 
-type View = "week" | "month";
+type View = "week" | "month" | "note";
 
 // ── pure helpers ──────────────────────────────────────────────
 
@@ -73,11 +73,14 @@ function getOverlapLayout(
   const result = new Map<string, { lane: number; totalLanes: number }>();
   if (daySessions.length === 0) return result;
 
-  // Greedy column packing — assign each session to the first column
-  // whose last occupant has already ended, minimising wasted width.
-  const sorted = [...daySessions].sort(
-    (a, b) => a.time_start.localeCompare(b.time_start) || a.time_end.localeCompare(b.time_end)
-  );
+  // Greedy column packing — sort by explicit sort_order first so clubs can
+  // pin sessions to consistent columns, then fall back to time_start.
+  const sorted = [...daySessions].sort((a, b) => {
+    const sa = a.sort_order ?? Infinity;
+    const sb = b.sort_order ?? Infinity;
+    if (sa !== sb) return sa - sb;
+    return a.time_start.localeCompare(b.time_start) || a.time_end.localeCompare(b.time_end);
+  });
   const cols: TrainingSession[][] = [];
   const sessionCol = new Map<string, number>();
 
@@ -248,30 +251,41 @@ function DayTimetable({
   sessions,
   trainers,
   virtualTrainers,
+  topics,
+  sessionTypes,
   canEdit,
   onEdit,
   onDelete,
   onNewSession,
   onBack,
   onAttendance,
+  onReorder,
 }: {
   dayIndex: number;
   weekStart: string;
   sessions: TrainingSession[];
   trainers: Profile[];
   virtualTrainers: VirtualTrainer[];
+  topics: ClubTopic[];
+  sessionTypes: ClubSessionType[];
   canEdit: boolean;
   onEdit: (s: TrainingSession) => void;
   onDelete: (s: TrainingSession) => void;
   onNewSession: (day: number) => void;
   onBack: () => void;
   onAttendance: (s: TrainingSession) => void;
+  onReorder: (id1: string, id2: string) => void;
 }) {
   const daySessions = sessions
     .filter((s) => s.day_of_week === dayIndex)
     .sort((a, b) => a.time_start.localeCompare(b.time_start));
 
   const layout = getOverlapLayout(daySessions);
+
+  // Drag-to-reorder state
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dragStartX, setDragStartX] = useState<number | null>(null);
+  const sessionAreaRef = useRef<HTMLDivElement>(null);
 
   const allMins = daySessions.flatMap((s) => [timeToMin(s.time_start), timeToMin(s.time_end)]);
   const rangeStart = allMins.length ? Math.floor(Math.min(...allMins) / 60) * 60 : 8 * 60;
@@ -337,7 +351,7 @@ function DayTimetable({
             </div>
 
             {/* Session area */}
-            <div className="relative" style={{ minWidth: sessionAreaMinWidth, flex: "1 0 auto" }}>
+            <div ref={sessionAreaRef} className="relative" style={{ minWidth: sessionAreaMinWidth, flex: "1 0 auto" }}>
               {/* Hour lines */}
               {hours.map((h) => (
                 <div
@@ -361,8 +375,8 @@ function DayTimetable({
                   .filter((st) => st.virtual_trainer_id)
                   .map((st) => virtualTrainers.find((vt) => vt.id === st.virtual_trainer_id))
                   .filter((vt): vt is VirtualTrainer => Boolean(vt));
-                const types  = s.session_types ?? [];
-                const topics = s.topics ?? [];
+                const typeNames  = s.session_types ?? [];
+                const topicNames = s.topics ?? [];
 
                 const colorKey = (s.color ?? "neutral") as SessionColor;
                 const colorCfg = SESSION_COLORS[colorKey] ?? SESSION_COLORS.neutral;
@@ -370,16 +384,19 @@ function DayTimetable({
 
                 const isOverlapping = info.totalLanes > 1;
 
+                const isDragging = dragId === s.id;
+
                 return (
                   <div
                     key={s.id}
                     className={`absolute overflow-hidden group ${
                       isOverlapping ? "rounded-lg" : "rounded-xl"
-                    } border ${
+                    } border transition-shadow ${
                       s.is_cancelled
                         ? "bg-destructive/8 border-destructive/30"
                         : hasColor ? "" : "bg-card border-primary/20"
-                    } ${isOverlapping && !hasColor && !s.is_cancelled ? "shadow-sm" : ""}`}
+                    } ${isOverlapping && !hasColor && !s.is_cancelled ? "shadow-sm" : ""}
+                    ${isDragging ? "ring-2 ring-primary/50 shadow-lg z-20 opacity-90" : ""}`}
                     style={{
                       top,
                       height,
@@ -388,6 +405,50 @@ function DayTimetable({
                       ...(hasColor ? { backgroundColor: colorCfg.bg, borderColor: colorCfg.border } : {}),
                     }}
                   >
+                    {/* Drag handle — only for overlapping sessions when editing is allowed */}
+                    {isOverlapping && canEdit && (
+                      <div
+                        className={`absolute top-0 inset-x-0 flex justify-center pt-1 pb-0.5 cursor-grab active:cursor-grabbing touch-none select-none z-10 transition-opacity ${
+                          isDragging ? "opacity-100" : "opacity-25 hover:opacity-60"
+                        }`}
+                        title="Reihenfolge verschieben"
+                        onPointerDown={(e) => {
+                          e.stopPropagation();
+                          (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                          setDragId(s.id);
+                          setDragStartX(e.clientX);
+                        }}
+                        onPointerMove={(e) => {
+                          if (dragStartX === null || dragId !== s.id) return;
+                          const dx = e.clientX - dragStartX;
+                          const areaWidth = sessionAreaRef.current?.getBoundingClientRect().width ?? 400;
+                          const laneWidth = areaWidth / info.totalLanes;
+                          if (Math.abs(dx) > laneWidth * 0.35) {
+                            const dir = dx > 0 ? 1 : -1;
+                            const targetLane = info.lane + dir;
+                            const target = daySessions.find((o) => {
+                              if (o.id === s.id) return false;
+                              const oi = layout.get(o.id);
+                              return oi?.lane === targetLane &&
+                                o.time_start < s.time_end &&
+                                o.time_end > s.time_start;
+                            });
+                            if (target) {
+                              onReorder(s.id, target.id);
+                              setDragStartX(e.clientX);
+                            }
+                          }
+                        }}
+                        onPointerUp={() => { setDragId(null); setDragStartX(null); }}
+                        onPointerCancel={() => { setDragId(null); setDragStartX(null); }}
+                      >
+                        <svg width="14" height="8" viewBox="0 0 14 8" fill="currentColor" className={isDragging ? "text-primary" : "text-muted-foreground"}>
+                          <circle cx="2"  cy="2" r="1.3"/><circle cx="7"  cy="2" r="1.3"/><circle cx="12" cy="2" r="1.3"/>
+                          <circle cx="2"  cy="6" r="1.3"/><circle cx="7"  cy="6" r="1.3"/><circle cx="12" cy="6" r="1.3"/>
+                        </svg>
+                      </div>
+                    )}
+
                     {/* Left accent stripe for overlapping sessions */}
                     {isOverlapping && !s.is_cancelled && (
                       <div
@@ -406,18 +467,46 @@ function DayTimetable({
                       {formatTime(s.time_start)} – {formatTime(s.time_end)}
                     </p>
 
-                    {topics.length > 0 && (
+                    {topicNames.length > 0 && (
                       <div className="flex flex-wrap gap-1 mb-1">
-                        {topics.map((t) => (
-                          <span key={t} className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-primary/15 text-primary border border-primary/20">{t}</span>
-                        ))}
+                        {topicNames.map((name) => {
+                          const topicColor = topics.find((t) => t.name === name)?.color as SessionColor | null | undefined;
+                          const cfg = topicColor ? SESSION_COLORS[topicColor] : null;
+                          return (
+                            <span
+                              key={name}
+                              className="text-[10px] font-semibold px-2 py-0.5 rounded-full border"
+                              style={cfg ? {
+                                backgroundColor: cfg.bg || `${cfg.hex}25`,
+                                borderColor: cfg.border || `${cfg.hex}60`,
+                                color: cfg.hex,
+                              } : {
+                                backgroundColor: "hsl(var(--primary) / 0.15)",
+                                borderColor: "hsl(var(--primary) / 0.2)",
+                                color: "hsl(var(--primary))",
+                              }}
+                            >{name}</span>
+                          );
+                        })}
                       </div>
                     )}
-                    {types.length > 0 && (
+                    {typeNames.length > 0 && (
                       <div className="flex flex-wrap gap-1 mb-1">
-                        {types.map((t) => (
-                          <span key={t} className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-secondary text-secondary-foreground">{t}</span>
-                        ))}
+                        {typeNames.map((name) => {
+                          const typeColor = sessionTypes.find((t) => t.name === name)?.color as SessionColor | null | undefined;
+                          const cfg = typeColor ? SESSION_COLORS[typeColor] : null;
+                          return (
+                            <span
+                              key={name}
+                              className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${!cfg ? "bg-secondary text-secondary-foreground border-transparent" : ""}`}
+                              style={cfg ? {
+                                backgroundColor: cfg.bg || `${cfg.hex}20`,
+                                borderColor: cfg.border || `${cfg.hex}50`,
+                                color: cfg.hex,
+                              } : undefined}
+                            >{name}</span>
+                          );
+                        })}
                       </div>
                     )}
 
@@ -670,6 +759,9 @@ export function WeeklyPlanEditor({
   const [groupMemberCounts, setGroupMemberCounts] = useState<Record<string, number>>({});
   const [attendanceSummaries, setAttendanceSummaries] = useState<Map<string, AttendanceSummary>>(new Map());
   const [attendanceSummaryRevision, setAttendanceSummaryRevision] = useState(0);
+  const [noteText, setNoteText] = useState(initialWeek?.notes ?? "");
+  const [noteSaving, setNoteSaving] = useState(false);
+  const [noteSaved, setNoteSaved] = useState(false);
 
   // Fetch teilnehmer groups + member counts for this club (used in session expected-group picker)
   useEffect(() => {
@@ -743,6 +835,7 @@ export function WeeklyPlanEditor({
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect */
     setWeek(initialWeek);
+    setNoteText(initialWeek?.notes ?? "");
     setHasChanges(false);
     setHasRemoteChanges(false);
     /* eslint-enable react-hooks/set-state-in-effect */
@@ -810,6 +903,20 @@ export function WeeklyPlanEditor({
     if (error) throw new Error(error.message);
     setWeek({ ...data, training_sessions: [] });
     return data.id;
+  }
+
+  async function saveNote(value: string) {
+    if (!canEdit) return;
+    suppressRealtimeRef.current = true;
+    setNoteSaving(true);
+    const supabase = createClient();
+    const weekId = await ensureWeekExists().catch(() => null);
+    if (!weekId) { setNoteSaving(false); return; }
+    await supabase.from("training_weeks").update({ notes: value.trim() || null }).eq("id", weekId);
+    setWeek((w) => w ? { ...w, notes: value.trim() || null } : w);
+    setNoteSaving(false);
+    setNoteSaved(true);
+    setTimeout(() => setNoteSaved(false), 2000);
   }
 
   async function togglePublish(scope: "single" | "month" | "all" = "single") {
@@ -925,7 +1032,7 @@ export function WeeklyPlanEditor({
       day_of_week: number; time_start: string; time_end: string;
       location_id: string | null; topics: string[]; session_types: string[];
       description: string | null; trainer_ids: string[]; virtual_trainer_ids: string[];
-      is_cancelled: boolean; color: string | null; expected_group_ids: string[];
+      is_cancelled: boolean; color: string | null; sort_order: number | null; expected_group_ids: string[];
     },
     fromWeekStart: string,
     numWeeks: number,
@@ -974,6 +1081,7 @@ export function WeeklyPlanEditor({
         trainer_id: data.trainer_ids[0] ?? null,
         is_cancelled: data.is_cancelled,
         color: data.color,
+        sort_order: data.sort_order,
         template_id: templateId,
         is_modified: false,
         tags: [],
@@ -1031,7 +1139,7 @@ export function WeeklyPlanEditor({
             description: data.description, location_id: data.location_id,
             locations: locations.find((l) => l.id === data.location_id),
             trainer_id: trainer_ids[0] ?? null, is_cancelled: data.is_cancelled,
-            color: data.color, template_id: null, is_modified: false,
+            color: data.color, sort_order: data.sort_order, template_id: null, is_modified: false,
             session_trainers: [
               ...trainer_ids.map((uid) => ({ session_id: created.id, user_id: uid, virtual_trainer_id: null })),
               ...virtual_trainer_ids.map((vid) => ({ session_id: created.id, user_id: null, virtual_trainer_id: vid })),
@@ -1066,6 +1174,7 @@ export function WeeklyPlanEditor({
           virtual_trainer_ids,
           is_cancelled: data.is_cancelled,
           color: data.color,
+          sort_order: data.sort_order,
           generated_through: generatedThrough,
           auto_extend,
           tags: [],
@@ -1134,6 +1243,7 @@ export function WeeklyPlanEditor({
         virtual_trainer_ids,
         is_cancelled: data.is_cancelled,
         color: data.color,
+        sort_order: data.sort_order,
         auto_extend,
       }).eq("id", templateId);
 
@@ -1191,6 +1301,38 @@ export function WeeklyPlanEditor({
     setEditingSession(null);
     setHasChanges(true);
     startTransition(() => router.refresh());
+  }
+
+  async function handleReorderSessions(id1: string, id2: string) {
+    const allSessions = week?.training_sessions ?? [];
+    const s1 = allSessions.find((s) => s.id === id1);
+    const s2 = allSessions.find((s) => s.id === id2);
+    if (!s1 || !s2) return;
+
+    // Compute current lane positions so we can use them as initial sort_order
+    const daySessions = allSessions.filter((s) => s.day_of_week === s1.day_of_week);
+    const layout = getOverlapLayout(daySessions);
+    const lane1 = layout.get(id1)?.lane ?? 0;
+    const lane2 = layout.get(id2)?.lane ?? 0;
+
+    // Use existing sort_order if set, otherwise initialise from current lane
+    const newO1 = s2.sort_order ?? lane2; // s1 takes s2's position
+    const newO2 = s1.sort_order ?? lane1; // s2 takes s1's position
+
+    // Optimistic local update so the layout re-renders immediately
+    setWeek((w) => w ? {
+      ...w,
+      training_sessions: (w.training_sessions ?? []).map((s) =>
+        s.id === id1 ? { ...s, sort_order: newO1 } :
+        s.id === id2 ? { ...s, sort_order: newO2 } : s
+      ),
+    } : w);
+
+    const supabase = createClient();
+    await Promise.all([
+      supabase.from("training_sessions").update({ sort_order: newO1 }).eq("id", id1),
+      supabase.from("training_sessions").update({ sort_order: newO2 }).eq("id", id2),
+    ]);
   }
 
   function requestDelete(session: TrainingSession) {
@@ -1428,6 +1570,21 @@ export function WeeklyPlanEditor({
             {v === "week" ? "Wochenplan" : "Monatsansicht"}
           </button>
         ))}
+        {canEdit && (
+          <button
+            onClick={() => { setView("note"); setSelectedDay(null); }}
+            className={`pb-2.5 px-1 mr-4 text-sm font-medium border-b-2 transition-colors -mb-px flex items-center gap-1.5 ${
+              view === "note"
+                ? "border-amber-500 text-amber-700 dark:text-amber-400"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Wochennotiz
+            {noteText.trim() && view !== "note" && (
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+            )}
+          </button>
+        )}
       </div>
 
       {/* ── Month view ─────────────────────────────────────── */}
@@ -1439,6 +1596,52 @@ export function WeeklyPlanEditor({
         />
       )}
 
+      {/* ── Note view ──────────────────────────────────────── */}
+      {view === "note" && (
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={spring}
+          className="space-y-4"
+        >
+          <div className="rounded-2xl border border-amber-500/25 bg-amber-50/50 dark:bg-amber-950/20 dark:border-amber-500/15 overflow-hidden">
+            <div className="px-5 pt-4 pb-2 flex items-center gap-2.5 border-b border-amber-500/15">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-600 dark:text-amber-400 shrink-0" stroke="currentColor">
+                <path d="M11 5.882V19.24a1.76 1.76 0 0 1-3.417.592l-2.147-6.15M18 13a3 3 0 0 0 0-6M5.436 13.683A4.001 4.001 0 0 1 7 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 0 1-1.564-.317z"/>
+              </svg>
+              <span className="text-xs font-bold uppercase tracking-widest text-amber-700/80 dark:text-amber-400/70 flex-1">
+                Wochennotiz — {new Date(weekStart + "T00:00:00").toLocaleDateString("de-DE", { day: "numeric", month: "long", year: "numeric" })}
+              </span>
+            </div>
+            <div className="px-5 py-4 space-y-3">
+              <textarea
+                value={noteText}
+                onChange={(e) => setNoteText(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) saveNote(noteText); }}
+                placeholder="Hinweis für diese Woche — z. B. Turnier, Saalwechsel, Sondertraining, Änderungen im Ablauf…"
+                rows={6}
+                className="w-full bg-transparent text-sm resize-none focus:outline-none placeholder:text-amber-900/30 dark:placeholder:text-amber-100/20 text-amber-950 dark:text-amber-100 leading-relaxed"
+              />
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => saveNote(noteText)}
+                  disabled={noteSaving}
+                  className="h-8 px-4 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold disabled:opacity-50 transition-colors"
+                >
+                  {noteSaving ? "Speichern…" : "Speichern"}
+                </button>
+                <span className={`text-xs font-medium transition-opacity duration-300 ${noteSaved ? "text-green-600 dark:text-green-400 opacity-100" : "opacity-0"}`}>
+                  Gespeichert ✓
+                </span>
+              </div>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground px-1">
+            Diese Notiz wird in der öffentlichen Ansicht oben als Hinweisbanner angezeigt, solange die Woche aktiv ist. Leer lassen, um kein Banner anzuzeigen.
+          </p>
+        </motion.div>
+      )}
 
       {/* ── Week view ──────────────────────────────────────── */}
       {view === "week" && (
@@ -1451,12 +1654,15 @@ export function WeeklyPlanEditor({
               sessions={sessions}
               trainers={trainers}
               virtualTrainers={virtualTrainers}
+              topics={topics}
+              sessionTypes={sessionTypes}
               canEdit={canEdit}
               onEdit={(s) => setEditingSession(s)}
               onDelete={requestDelete}
               onNewSession={openNewSession}
               onBack={() => setSelectedDay(null)}
               onAttendance={(s) => setAttendanceSession(s)}
+              onReorder={handleReorderSessions}
             />
           ) : (
             <>
@@ -1505,7 +1711,7 @@ export function WeeklyPlanEditor({
                             <p className="text-xs text-muted-foreground/50 py-1 px-1">Kein Training</p>
                           ) : (
                             daySessions.map((session) => (
-                              <SessionCard key={session.id} session={session} trainers={trainers} virtualTrainers={virtualTrainers} canEdit={canEdit} isToday={isToday} attendanceSummary={attendanceSummaries.get(session.id)} onEdit={() => setEditingSession(session)} onDelete={() => requestDelete(session)} onAttendance={() => setAttendanceSession(session)} />
+                              <SessionCard key={session.id} session={session} trainers={trainers} virtualTrainers={virtualTrainers} topics={topics} sessionTypes={sessionTypes} canEdit={canEdit} isToday={isToday} attendanceSummary={attendanceSummaries.get(session.id)} onEdit={() => setEditingSession(session)} onDelete={() => requestDelete(session)} onAttendance={() => setAttendanceSession(session)} />
                             ))
                           )}
                         </div>
@@ -1540,7 +1746,7 @@ export function WeeklyPlanEditor({
                       </button>
                       <div className="flex-1 space-y-2">
                         {daySessions.map((session) => (
-                          <SessionCard key={session.id} session={session} trainers={trainers} virtualTrainers={virtualTrainers} canEdit={canEdit} isToday={isToday} attendanceSummary={attendanceSummaries.get(session.id)} onEdit={() => setEditingSession(session)} onDelete={() => requestDelete(session)} onAttendance={() => setAttendanceSession(session)} />
+                          <SessionCard key={session.id} session={session} trainers={trainers} virtualTrainers={virtualTrainers} topics={topics} sessionTypes={sessionTypes} canEdit={canEdit} isToday={isToday} attendanceSummary={attendanceSummaries.get(session.id)} onEdit={() => setEditingSession(session)} onDelete={() => requestDelete(session)} onAttendance={() => setAttendanceSession(session)} />
                         ))}
                         {canEdit && (
                           <button onClick={() => openNewSession(dayIndex)} className="w-full text-xs text-muted-foreground/50 border border-dashed border-border rounded-xl py-2 hover:border-primary/40 hover:text-primary transition-colors">

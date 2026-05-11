@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
-import type { ClubTopic, ClubSessionType, Location } from "@/types";
+import type { ClubTopic, ClubSessionType, Location, SessionColor } from "@/types";
+import { SESSION_COLORS } from "@/types";
 import { createClient } from "@/lib/supabase/client";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,6 +23,8 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 
 // ── Structured list (topics & session types) ─────────────────
 
+const COLOR_KEYS = Object.keys(SESSION_COLORS).filter((k) => k !== "neutral") as SessionColor[];
+
 function ChipListSection({
   title,
   description,
@@ -34,7 +37,7 @@ function ChipListSection({
 }: {
   title: string;
   description: string;
-  items: { id: string; name: string }[];
+  items: { id: string; name: string; color: string | null }[];
   emptyText: string;
   placeholder: string;
   tableName: "club_topics" | "club_session_types";
@@ -47,6 +50,7 @@ function ChipListSection({
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
+  const [editColor, setEditColor] = useState<SessionColor | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
 
   async function add() {
@@ -56,9 +60,9 @@ function ChipListSection({
     const supabase = createClient();
     const { data, error } = await supabase
       .from(tableName)
-      .insert({ club_id: clubId, name })
+      .insert({ club_id: clubId, name, color: null })
       .select()
-      .single<{ id: string; name: string }>();
+      .single<{ id: string; name: string; color: string | null }>();
     if (error) {
       toast.error(error.code === "23505" ? "Eintrag existiert bereits." : error.message);
     } else {
@@ -78,25 +82,28 @@ function ChipListSection({
     toast.success("Gelöscht.");
   }
 
-  function startEdit(item: { id: string; name: string }) {
+  function startEdit(item: { id: string; name: string; color: string | null }) {
     setEditingId(item.id);
     setEditName(item.name);
+    setEditColor((item.color as SessionColor | null) ?? null);
   }
 
-  async function saveRename() {
+  async function saveEdit() {
     if (!editingId) return;
     const name = editName.trim();
     const original = list.find((t) => t.id === editingId);
-    if (!name || name === original?.name) { setEditingId(null); return; }
+    if (!name) { setEditingId(null); return; }
+    const noChange = name === original?.name && editColor === ((original?.color as SessionColor | null) ?? null);
+    if (noChange) { setEditingId(null); return; }
     const supabase = createClient();
-    const { error } = await supabase.from(tableName).update({ name }).eq("id", editingId);
+    const { error } = await supabase.from(tableName).update({ name, color: editColor }).eq("id", editingId);
     if (error) { toast.error(error.message); return; }
     setList((prev) =>
-      prev.map((t) => t.id === editingId ? { ...t, name } : t)
+      prev.map((t) => t.id === editingId ? { ...t, name, color: editColor } : t)
         .sort((a, b) => a.name.localeCompare(b.name))
     );
     setEditingId(null);
-    toast.success("Umbenannt.");
+    toast.success("Gespeichert.");
   }
 
   return (
@@ -119,43 +126,75 @@ function ChipListSection({
               >
                 {editingId === t.id ? (
                   /* ── Inline edit row ── */
-                  <div className="flex items-center gap-2 px-3 py-2 bg-primary/5">
-                    <Input
-                      value={editName}
-                      onChange={(e) => setEditName(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") { e.preventDefault(); saveRename(); }
-                        if (e.key === "Escape") setEditingId(null);
-                      }}
-                      autoFocus
-                      className="h-8 rounded-lg text-sm flex-1"
-                    />
-                    <button
-                      type="button"
-                      onClick={saveRename}
-                      disabled={!editName.trim()}
-                      className="h-8 px-3 rounded-lg bg-primary text-primary-foreground text-xs font-semibold disabled:opacity-40 hover:opacity-90 transition-opacity shrink-0"
-                    >
-                      Speichern
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setEditingId(null)}
-                      className="h-8 px-2.5 rounded-lg border border-border text-xs hover:bg-secondary transition-colors shrink-0"
-                    >
-                      Abbrechen
-                    </button>
+                  <div className="px-3 py-2.5 bg-primary/5 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Input
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") { e.preventDefault(); saveEdit(); }
+                          if (e.key === "Escape") setEditingId(null);
+                        }}
+                        autoFocus
+                        className="h-8 rounded-lg text-sm flex-1"
+                      />
+                      <button
+                        type="button"
+                        onClick={saveEdit}
+                        disabled={!editName.trim()}
+                        className="h-8 px-3 rounded-lg bg-primary text-primary-foreground text-xs font-semibold disabled:opacity-40 hover:opacity-90 transition-opacity shrink-0"
+                      >
+                        Speichern
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingId(null)}
+                        className="h-8 px-2.5 rounded-lg border border-border text-xs hover:bg-secondary transition-colors shrink-0"
+                      >
+                        Abbrechen
+                      </button>
+                    </div>
+                    {/* Color picker */}
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setEditColor(null)}
+                        title="Keine Farbe"
+                        className={`w-5 h-5 rounded-full border-2 transition-all bg-muted ${editColor === null ? "border-foreground scale-110" : "border-transparent hover:border-muted-foreground"}`}
+                      />
+                      {COLOR_KEYS.map((key) => {
+                        const cfg = SESSION_COLORS[key];
+                        return (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() => setEditColor(key)}
+                            title={cfg.label}
+                            className={`w-5 h-5 rounded-full border-2 transition-all ${editColor === key ? "border-foreground scale-110" : "border-transparent hover:scale-105"}`}
+                            style={{ backgroundColor: cfg.hex }}
+                          />
+                        );
+                      })}
+                    </div>
                   </div>
                 ) : (
                   /* ── Display row ── */
                   <div className="flex items-center gap-2 px-3 py-2.5 group hover:bg-secondary/40 transition-colors">
+                    {t.color ? (
+                      <span
+                        className="w-2.5 h-2.5 rounded-full shrink-0"
+                        style={{ backgroundColor: SESSION_COLORS[t.color as SessionColor]?.hex ?? "#94a3b8" }}
+                      />
+                    ) : (
+                      <span className="w-2.5 h-2.5 rounded-full shrink-0 bg-muted-foreground/20" />
+                    )}
                     <span className="flex-1 text-sm">{t.name}</span>
                     <div className="flex gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                       <button
                         type="button"
                         onClick={() => startEdit(t)}
                         className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
-                        aria-label={`${t.name} umbenennen`}
+                        aria-label={`${t.name} bearbeiten`}
                       >
                         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                           <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>

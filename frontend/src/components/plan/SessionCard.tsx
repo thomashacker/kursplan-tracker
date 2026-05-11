@@ -1,4 +1,4 @@
-import type { TrainingSession, Profile, SessionColor, VirtualTrainer } from "@/types";
+import type { TrainingSession, Profile, SessionColor, VirtualTrainer, ClubTopic, ClubSessionType } from "@/types";
 import { SESSION_COLORS } from "@/types";
 import { formatTime } from "@/lib/utils/date";
 
@@ -11,6 +11,8 @@ interface Props {
   session: TrainingSession;
   trainers: Profile[];
   virtualTrainers: VirtualTrainer[];
+  topics: ClubTopic[];
+  sessionTypes: ClubSessionType[];
   canEdit: boolean;
   isToday?: boolean;
   attendanceSummary?: AttendanceSummary;
@@ -19,7 +21,7 @@ interface Props {
   onAttendance?: () => void;
 }
 
-export function SessionCard({ session, trainers, virtualTrainers, canEdit, isToday, attendanceSummary, onEdit, onDelete, onAttendance }: Props) {
+export function SessionCard({ session, trainers, virtualTrainers, topics, sessionTypes, canEdit, isToday, attendanceSummary, onEdit, onDelete, onAttendance }: Props) {
   const cancelled = session.is_cancelled;
   const colorKey = (session.color ?? "neutral") as SessionColor;
   const colorCfg = SESSION_COLORS[colorKey] ?? SESSION_COLORS.neutral;
@@ -34,8 +36,8 @@ export function SessionCard({ session, trainers, virtualTrainers, canEdit, isTod
     .map((st) => virtualTrainers.find((vt) => vt.id === st.virtual_trainer_id))
     .filter((vt): vt is VirtualTrainer => Boolean(vt));
 
-  const types = session.session_types ?? [];
-  const topics = session.topics ?? [];
+  const typeNames = session.session_types ?? [];
+  const topicNames = session.topics ?? [];
 
   return (
     <div
@@ -81,29 +83,53 @@ export function SessionCard({ session, trainers, virtualTrainers, canEdit, isTod
       </div>
 
       {/* Topic chips — prominent */}
-      {topics.length > 0 && (
+      {topicNames.length > 0 && (
         <div className="flex flex-wrap gap-1 mb-1.5">
-          {topics.map((t) => (
-            <span key={t} className="inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-primary/10 text-primary border-primary/20">
-              {t}
-            </span>
-          ))}
+          {topicNames.map((name) => {
+            const topicColor = topics.find((t) => t.name === name)?.color as SessionColor | null | undefined;
+            const cfg = topicColor ? SESSION_COLORS[topicColor] : null;
+            return (
+              <span
+                key={name}
+                className="inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-full border"
+                style={cfg ? {
+                  backgroundColor: cfg.bg || `${cfg.hex}25`,
+                  borderColor: cfg.border || `${cfg.hex}60`,
+                  color: cfg.hex,
+                } : {
+                  backgroundColor: "hsl(var(--primary) / 0.1)",
+                  borderColor: "hsl(var(--primary) / 0.2)",
+                  color: "hsl(var(--primary))",
+                }}
+              >{name}</span>
+            );
+          })}
         </div>
       )}
 
       {/* Type chips — subtle */}
-      {types.length > 0 && (
+      {typeNames.length > 0 && (
         <div className="flex flex-wrap gap-1 mb-1.5">
-          {types.map((t) => (
-            <span key={t} className="inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full bg-secondary text-secondary-foreground">
-              {t}
-            </span>
-          ))}
+          {typeNames.map((name) => {
+            const typeColor = sessionTypes.find((t) => t.name === name)?.color as SessionColor | null | undefined;
+            const cfg = typeColor ? SESSION_COLORS[typeColor] : null;
+            return (
+              <span
+                key={name}
+                className={`inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full border ${!cfg ? "bg-secondary text-secondary-foreground border-transparent" : ""}`}
+                style={cfg ? {
+                  backgroundColor: cfg.bg || `${cfg.hex}20`,
+                  borderColor: cfg.border || `${cfg.hex}50`,
+                  color: cfg.hex,
+                } : undefined}
+              >{name}</span>
+            );
+          })}
         </div>
       )}
 
       {/* Empty state when no types/topics */}
-      {types.length === 0 && topics.length === 0 && (
+      {typeNames.length === 0 && topicNames.length === 0 && (
         <p className="text-xs text-muted-foreground/60 mb-1.5 italic">Kein Typ / Thema</p>
       )}
 

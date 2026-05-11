@@ -4,7 +4,7 @@ import type { TrainingSession, TrainingWeek, Club, Location } from "@/types";
 import { DAY_NAMES } from "@/types";
 import { getCurrentMonday, offsetWeek, toISODate, getSessionDate } from "@/lib/utils/date";
 import PublicPlanClient from "./PublicPlanClient";
-import type { PublicSession } from "./PublicPlanClient";
+import type { PublicSession, ColorMap } from "./PublicPlanClient";
 import { SiteFooter } from "@/components/layout/SiteFooter";
 
 // ── Date label helpers ────────────────────────────────────────
@@ -119,6 +119,17 @@ export default async function PublicPlanPage({
     );
   }
 
+  const [{ data: clubTopics }, { data: clubSessionTypes }] = await Promise.all([
+    supabase.from("club_topics").select("name, color").eq("club_id", club.id),
+    supabase.from("club_session_types").select("name, color").eq("club_id", club.id),
+  ]);
+  const topicColors: ColorMap = Object.fromEntries(
+    (clubTopics ?? []).map((t: { name: string; color: string | null }) => [t.name, t.color ?? null])
+  );
+  const typeColors: ColorMap = Object.fromEntries(
+    (clubSessionTypes ?? []).map((t: { name: string; color: string | null }) => [t.name, t.color ?? null])
+  );
+
   // Build serializable flat list
   const now = new Date();
   const todayStr = toISODate(now);
@@ -164,6 +175,7 @@ export default async function PublicPlanPage({
         trainerNames,
         trainers,
         color: session.color ?? null,
+        sortOrder: session.sort_order ?? null,
       });
     }
   }
@@ -171,6 +183,9 @@ export default async function PublicPlanPage({
   sessions.sort((a, b) =>
     a.dateKey.localeCompare(b.dateKey) || a.timeStart.localeCompare(b.timeStart)
   );
+
+  // Show the current week's note as a banner (only if it's the active week)
+  const currentWeekNote = (weeks ?? []).find(w => w.week_start === monday)?.notes ?? null;
 
   // Extract unique filter options (only from non-cancelled sessions)
   const active = sessions.filter((s) => !s.isCancelled);
@@ -209,7 +224,7 @@ export default async function PublicPlanPage({
         </div>
       </header>
       <div className="flex-1">
-        <PublicPlanClient sessions={sessions} filterOptions={filterOptions} />
+        <PublicPlanClient sessions={sessions} filterOptions={filterOptions} weekNote={currentWeekNote} topicColors={topicColors} typeColors={typeColors} />
       </div>
       <SiteFooter />
     </div>

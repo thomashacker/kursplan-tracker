@@ -70,6 +70,7 @@ export interface ClubTopic {
   id: string;
   club_id: string;
   name: string;
+  color: string | null;
   created_at: string;
 }
 
@@ -77,6 +78,7 @@ export interface ClubSessionType {
   id: string;
   club_id: string;
   name: string;
+  color: string | null;
   created_at: string;
 }
 
@@ -115,6 +117,7 @@ export interface TrainingSession {
   tags: string[];
   notes: string | null;
   color: string | null;
+  sort_order: number | null;
   created_at: string;
   updated_at: string;
   // attendance
@@ -144,6 +147,7 @@ export interface SessionTemplate {
   tags: string[];
   is_cancelled: boolean;
   color: string | null;
+  sort_order: number | null;
 }
 
 export type SessionColor = "neutral" | "blue" | "yellow" | "green" | "orange" | "pink";

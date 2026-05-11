@@ -40,6 +40,7 @@ export interface SessionSaveData {
   /** Whether the cron job should keep extending this template automatically */
   auto_extend: boolean;
   color: SessionColor | null;
+  sort_order: number | null;
   expected_group_ids: string[];
 }
 
@@ -71,7 +72,7 @@ function MultiTagSelect({
   emptyLinkLabel,
 }: {
   label: string;
-  options: { id: string; label: string }[];
+  options: { id: string; label: string; color?: string | null }[];
   selected: string[];
   onAdd: (id: string) => void;
   onRemove: (id: string) => void;
@@ -137,16 +138,23 @@ function MultiTagSelect({
 
           {open && available.length > 0 && (
             <div className="absolute z-50 mt-1 w-full rounded-xl border border-border bg-popover shadow-md overflow-hidden">
-              {available.map((opt) => (
-                <button
-                  key={opt.id}
-                  type="button"
-                  onClick={() => { onAdd(opt.id); setOpen(false); }}
-                  className="w-full text-left px-3 py-2 text-sm hover:bg-secondary transition-colors"
-                >
-                  {opt.label}
-                </button>
-              ))}
+              {available.map((opt) => {
+                const cfg = opt.color ? SESSION_COLORS[opt.color as SessionColor] : null;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => { onAdd(opt.id); setOpen(false); }}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-secondary transition-colors flex items-center gap-2"
+                  >
+                    <span
+                      className="w-2 h-2 rounded-full shrink-0"
+                      style={{ backgroundColor: cfg?.hex ?? "#94a3b8" }}
+                    />
+                    {opt.label}
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
@@ -157,16 +165,30 @@ function MultiTagSelect({
         <div className="flex flex-wrap gap-1.5 pt-0.5">
           {selected.map((id) => {
             const opt = options.find((o) => o.id === id);
+            const cfg = opt?.color ? SESSION_COLORS[opt.color as SessionColor] : null;
             return (
               <span
                 key={id}
-                className="inline-flex items-center gap-1 h-6 pl-2.5 pr-1.5 rounded-full text-xs font-medium bg-primary/10 text-primary border border-primary/20"
+                className="inline-flex items-center gap-1 h-6 pl-2 pr-1.5 rounded-full text-xs font-medium border"
+                style={cfg ? {
+                  backgroundColor: cfg.bg || `${cfg.hex}20`,
+                  borderColor: cfg.border || `${cfg.hex}50`,
+                  color: cfg.hex,
+                } : {
+                  backgroundColor: "hsl(var(--primary) / 0.1)",
+                  borderColor: "hsl(var(--primary) / 0.2)",
+                  color: "hsl(var(--primary))",
+                }}
               >
+                <span
+                  className="w-1.5 h-1.5 rounded-full shrink-0"
+                  style={{ backgroundColor: cfg?.hex ?? "hsl(var(--primary))" }}
+                />
                 {opt?.label ?? id}
                 <button
                   type="button"
                   onClick={() => onRemove(id)}
-                  className="flex items-center justify-center w-3.5 h-3.5 rounded-full hover:bg-primary/20 transition-colors"
+                  className="flex items-center justify-center w-3.5 h-3.5 rounded-full hover:opacity-70 transition-opacity"
                   aria-label={`${opt?.label ?? id} entfernen`}
                 >
                   <svg width="7" height="7" viewBox="0 0 8 8" fill="none">
@@ -577,6 +599,10 @@ export function SessionEditModal({
   const initColor = (session?.color ?? null) as SessionColor | null;
   const [selectedColor, setSelectedColor] = useState<SessionColor | null>(initColor);
 
+  // Sort order (display position in day view)
+  const [sortOrder, setSortOrder] = useState<number | null>(session?.sort_order ?? null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
   // Expected groups
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
   useEffect(() => {
@@ -613,6 +639,7 @@ export function SessionEditModal({
       edit_scope: editScope,
       auto_extend: autoExtend,
       color: selectedColor,
+      sort_order: sortOrder,
       expected_group_ids: selectedGroupIds,
     };
 
@@ -745,7 +772,7 @@ export function SessionEditModal({
           {/* Typ */}
           <MultiTagSelect
             label="Typ"
-            options={sessionTypes.map((t) => ({ id: t.name, label: t.name }))}
+            options={sessionTypes.map((t) => ({ id: t.name, label: t.name, color: t.color }))}
             selected={selectedTypes}
             onAdd={(id) => add(setSelectedTypes, id)}
             onRemove={(id) => remove(setSelectedTypes, id)}
@@ -758,7 +785,7 @@ export function SessionEditModal({
           {/* Themen */}
           <MultiTagSelect
             label="Themen"
-            options={topics.map((t) => ({ id: t.name, label: t.name }))}
+            options={topics.map((t) => ({ id: t.name, label: t.name, color: t.color }))}
             selected={selectedTopics}
             onAdd={(id) => add(setSelectedTopics, id)}
             onRemove={(id) => remove(setSelectedTopics, id)}
@@ -886,6 +913,62 @@ export function SessionEditModal({
               </button>
             </div>
           )}
+
+          {/* Erweiterte Einstellungen */}
+          <div>
+            <button
+              type="button"
+              onClick={() => setShowAdvanced((v) => !v)}
+              className="w-full flex items-center justify-between text-xs font-semibold uppercase tracking-widest text-muted-foreground py-1 hover:text-foreground transition-colors"
+            >
+              Erweiterte Einstellungen
+              <svg
+                width="12" height="12" viewBox="0 0 12 12" fill="none"
+                className={`shrink-0 transition-transform ${showAdvanced ? "rotate-180" : ""}`}
+              >
+                <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+
+            {showAdvanced && (
+              <div className="mt-3 rounded-xl border border-border bg-muted/30 p-3 space-y-1.5">
+                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                  Anzeigereihenfolge im Tagesplan
+                </Label>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Wenn mehrere Trainings gleichzeitig stattfinden, bestimmt dieser Wert die Reihenfolge von links nach rechts. Du kannst die Reihenfolge auch per Drag &amp; Drop direkt im Tagesplan ändern.
+                </p>
+                <div className="flex items-center gap-3 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setSortOrder((v) => Math.max(0, (v ?? 0) - 1))}
+                    className="w-8 h-8 rounded-lg border border-input bg-background flex items-center justify-center hover:bg-secondary transition-colors font-mono text-lg leading-none select-none"
+                  >
+                    −
+                  </button>
+                  <span className="min-w-[3rem] text-center font-mono text-sm font-semibold">
+                    {sortOrder ?? "Auto"}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSortOrder((v) => (v ?? -1) + 1)}
+                    className="w-8 h-8 rounded-lg border border-input bg-background flex items-center justify-center hover:bg-secondary transition-colors font-mono text-lg leading-none select-none"
+                  >
+                    +
+                  </button>
+                  {sortOrder !== null && (
+                    <button
+                      type="button"
+                      onClick={() => setSortOrder(null)}
+                      className="text-xs text-muted-foreground hover:text-foreground transition-colors underline underline-offset-2"
+                    >
+                      Zurücksetzen
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Cancelled toggle — danger zone */}
           <div className={`rounded-xl border-2 border-dashed p-3 transition-colors ${isCancelled ? "border-destructive/60 bg-destructive/5" : "border-destructive/25 bg-destructive/[0.02]"}`}>
