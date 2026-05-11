@@ -78,7 +78,7 @@ export default async function StatistikenPage({
   // Fetch weeks within the selected window, with extended session fields
   const { data: pastWeeks } = await supabase
     .from("training_weeks")
-    .select("week_start, training_sessions(id, time_start, time_end, is_cancelled, day_of_week, topics, session_types, session_trainers(user_id))")
+    .select("week_start, training_sessions(id, time_start, time_end, is_cancelled, day_of_week, topics, session_types, session_trainers(user_id, virtual_trainer_id))")
     .eq("club_id", club.id)
     .lt("week_start", currentMonday)
     .gte("week_start", fromMonday)
@@ -87,7 +87,8 @@ export default async function StatistikenPage({
   // ── Aggregate ────────────────────────────────────────────────
 
   type TrainerStat = { sessions: number; minutes: number; lastWeek: string };
-  const trainerMap = new Map<string, TrainerStat>();
+  const trainerMap = new Map<string, TrainerStat>();        // real user ids
+  const virtualTrainerMap = new Map<string, TrainerStat>(); // virtual trainer ids
   const weekCountMap = new Map<string, number>();
 
   let totalSessions = 0;
@@ -104,7 +105,7 @@ export default async function StatistikenPage({
 
   for (const week of pastWeeks ?? []) {
     const sessions = (week.training_sessions as (SessionMeta & {
-      session_trainers: { user_id: string }[];
+      session_trainers: { user_id: string | null; virtual_trainer_id: string | null }[];
     })[]).filter((s) => !s.is_cancelled);
 
     weekCountMap.set(week.week_start, sessions.length);
@@ -115,29 +116,48 @@ export default async function StatistikenPage({
       const dur = durationMin(s.time_start, s.time_end);
       totalMinutes += dur;
 
-      for (const st of (s as unknown as { session_trainers: { user_id: string }[] }).session_trainers ?? []) {
-        const prev = trainerMap.get(st.user_id) ?? { sessions: 0, minutes: 0, lastWeek: "" };
-        trainerMap.set(st.user_id, {
-          sessions: prev.sessions + 1,
-          minutes:  prev.minutes + dur,
-          lastWeek: prev.lastWeek < week.week_start ? week.week_start : prev.lastWeek,
-        });
+      for (const st of (s as unknown as { session_trainers: { user_id: string | null; virtual_trainer_id: string | null }[] }).session_trainers ?? []) {
+        if (st.user_id) {
+          const prev = trainerMap.get(st.user_id) ?? { sessions: 0, minutes: 0, lastWeek: "" };
+          trainerMap.set(st.user_id, {
+            sessions: prev.sessions + 1,
+            minutes:  prev.minutes + dur,
+            lastWeek: prev.lastWeek < week.week_start ? week.week_start : prev.lastWeek,
+          });
+        } else if (st.virtual_trainer_id) {
+          const prev = virtualTrainerMap.get(st.virtual_trainer_id) ?? { sessions: 0, minutes: 0, lastWeek: "" };
+          virtualTrainerMap.set(st.virtual_trainer_id, {
+            sessions: prev.sessions + 1,
+            minutes:  prev.minutes + dur,
+            lastWeek: prev.lastWeek < week.week_start ? week.week_start : prev.lastWeek,
+          });
+        }
       }
     }
   }
 
   const pastSessionIds = allSessions.map((s) => s.id);
 
-  // Fetch trainer profiles
+  // Fetch real trainer profiles + virtual trainer names in parallel
   const trainerIds = [...trainerMap.keys()];
-  const { data: profiles } = trainerIds.length
-    ? await supabase.from("profiles").select("id, full_name").in("id", trainerIds)
-    : { data: [] };
-  const profileMap = Object.fromEntries((profiles ?? []).map((p) => [p.id, p.full_name as string]));
+  const virtualTrainerIds = [...virtualTrainerMap.keys()];
 
-  const trainerRows = [...trainerMap.entries()]
-    .map(([id, stat]) => ({ id, name: profileMap[id] ?? "Unbekannt", ...stat }))
-    .sort((a, b) => b.sessions - a.sessions);
+  const [{ data: profiles }, { data: virtualTrainers }] = await Promise.all([
+    trainerIds.length
+      ? supabase.from("profiles").select("id, full_name").in("id", trainerIds)
+      : Promise.resolve({ data: [] }),
+    virtualTrainerIds.length
+      ? supabase.from("virtual_trainers").select("id, name").in("id", virtualTrainerIds)
+      : Promise.resolve({ data: [] }),
+  ]);
+
+  const profileMap = Object.fromEntries((profiles ?? []).map((p) => [p.id, p.full_name as string]));
+  const virtualProfileMap = Object.fromEntries((virtualTrainers ?? []).map((vt) => [vt.id, vt.name as string]));
+
+  const trainerRows = [
+    ...[...trainerMap.entries()].map(([id, stat]) => ({ id, name: profileMap[id] ?? "Unbekannt", ...stat })),
+    ...[...virtualTrainerMap.entries()].map(([id, stat]) => ({ id, name: virtualProfileMap[id] ?? "Unbekannt", ...stat })),
+  ].sort((a, b) => b.sessions - a.sessions);
 
   const maxSessions = trainerRows[0]?.sessions ?? 1;
 
