@@ -3,14 +3,13 @@
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { useTransition } from "react";
 
-export type TimeWindow = "1w" | "1m" | "3m" | "6m" | "1y";
+export type TimeWindow = "current_month" | "last_month" | "6m" | "1y";
 
 const OPTIONS: { value: TimeWindow; label: string }[] = [
-  { value: "1w", label: "1 Woche" },
-  { value: "1m", label: "1 Monat" },
-  { value: "3m", label: "3 Monate" },
-  { value: "6m", label: "6 Monate" },
-  { value: "1y", label: "1 Jahr" },
+  { value: "current_month", label: "Diesen Monat" },
+  { value: "last_month",    label: "Letzten Monat" },
+  { value: "6m",            label: "6 Monate" },
+  { value: "1y",            label: "1 Jahr" },
 ];
 
 export default function TimeWindowPicker({ current }: { current: TimeWindow }) {
@@ -28,7 +27,7 @@ export default function TimeWindowPicker({ current }: { current: TimeWindow }) {
   }
 
   return (
-    <div className={`flex gap-1 p-1 rounded-xl bg-secondary/50 border border-border transition-opacity ${isPending ? "opacity-50" : ""}`}>
+    <div className={`flex flex-wrap gap-1 p-1 rounded-xl bg-secondary/50 border border-border transition-opacity ${isPending ? "opacity-50" : ""}`}>
       {OPTIONS.map((opt) => (
         <button
           key={opt.value}

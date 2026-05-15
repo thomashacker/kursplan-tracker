@@ -154,8 +154,19 @@ export default function TeilnehmerPage() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
+  // Search + filter
+  const [search, setSearch] = useState("");
+  const [filterGroup, setFilterGroup] = useState<"all" | "none" | string>("all");
+  const [filterMenuOpen, setFilterMenuOpen] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const filterMenuRef = useRef<HTMLDivElement>(null);
+  const toolsMenuRef = useRef<HTMLDivElement>(null);
+
+  // Add-teilnehmer modal
+  const [addOpen, setAddOpen] = useState(false);
   const [addName, setAddName] = useState("");
   const [addLoading, setAddLoading] = useState(false);
+  const [addGroupIds, setAddGroupIds] = useState<Set<string>>(new Set());
 
   const [bulkText, setBulkText] = useState("");
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -220,24 +231,59 @@ export default function TeilnehmerPage() {
     init();
   }, [slug, supabase, fetchAll]);
 
-  // Close group menu on outside click
+  // Close popover menus on outside click
   useEffect(() => {
     function handle(e: MouseEvent) {
-      if (groupMenuRef.current && !groupMenuRef.current.contains(e.target as Node)) setGroupMenuId(null);
+      const t = e.target as Node;
+      if (groupMenuRef.current && !groupMenuRef.current.contains(t)) setGroupMenuId(null);
+      if (filterMenuRef.current && !filterMenuRef.current.contains(t)) setFilterMenuOpen(false);
+      if (toolsMenuRef.current && !toolsMenuRef.current.contains(t)) setToolsOpen(false);
     }
     document.addEventListener("mousedown", handle);
     return () => document.removeEventListener("mousedown", handle);
   }, []);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
-  async function handleAddSingle(e: React.FormEvent) {
+  async function handleAddTeilnehmer(e: React.FormEvent) {
     e.preventDefault();
     if (!clubId || !addName.trim()) return;
     setAddLoading(true);
-    const { error } = await supabase.from("teilnehmer").insert({ club_id: clubId, name: addName.trim() });
-    if (error) toast.error(error.message);
-    else { toast.success(`${addName.trim()} hinzugefügt`); setAddName(""); await fetchAll(clubId); }
+    const name = addName.trim();
+    const { data: inserted, error } = await supabase
+      .from("teilnehmer")
+      .insert({ club_id: clubId, name })
+      .select("id")
+      .single();
+    if (error) {
+      toast.error(error.message);
+      setAddLoading(false);
+      return;
+    }
+    if (inserted && addGroupIds.size > 0) {
+      const rows = [...addGroupIds].map((gid) => ({
+        group_id: gid,
+        teilnehmer_id: inserted.id,
+      }));
+      const { error: gmErr } = await supabase
+        .from("teilnehmer_group_members")
+        .insert(rows);
+      if (gmErr) toast.error("Gruppenzuweisung fehlgeschlagen");
+    }
+    toast.success(`${name} hinzugefügt`);
+    setAddName("");
+    setAddGroupIds(new Set());
+    setAddOpen(false);
+    await fetchAll(clubId);
     setAddLoading(false);
+  }
+
+  function toggleAddGroup(gid: string) {
+    setAddGroupIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(gid)) next.delete(gid);
+      else next.add(gid);
+      return next;
+    });
   }
 
   async function handleScanAdd(payload: TeilnehmerQRPayload) {
@@ -391,6 +437,32 @@ export default function TeilnehmerPage() {
   const qrTarget = teilnehmer.find((x) => x.id === qrViewId);
   const assignGroup = groups.find((g) => g.id === assignGroupId);
 
+  // ── Derived list for Liste tab (search + group filter + sort) ────────────
+  const searchLower = search.trim().toLowerCase();
+  const groupsByTeilnehmer = new Map<string, string[]>();
+  for (const gm of groupMembers) {
+    const list = groupsByTeilnehmer.get(gm.teilnehmer_id) ?? [];
+    list.push(gm.group_id);
+    groupsByTeilnehmer.set(gm.teilnehmer_id, list);
+  }
+  const filtered = teilnehmer
+    .filter((t) => searchLower === "" || t.name.toLowerCase().includes(searchLower))
+    .filter((t) => {
+      if (filterGroup === "all") return true;
+      const tg = groupsByTeilnehmer.get(t.id) ?? [];
+      if (filterGroup === "none") return tg.length === 0;
+      return tg.includes(filterGroup);
+    })
+    .sort((a, b) =>
+      sortDir === "asc"
+        ? a.name.localeCompare(b.name, "de")
+        : b.name.localeCompare(a.name, "de"),
+    );
+  const activeFilterGroup =
+    filterGroup !== "all" && filterGroup !== "none"
+      ? groups.find((g) => g.id === filterGroup) ?? null
+      : null;
+
   return (
     <div className="space-y-6 pb-10">
 
@@ -429,88 +501,221 @@ export default function TeilnehmerPage() {
 
       {/* ══ LIST TAB ════════════════════════════════════════════════════════ */}
       {tab === "list" && (
-        <div className="space-y-5">
+        <div className="space-y-4">
 
-          {/* Action buttons */}
-          <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => setBulkOpen(true)}
-              className="flex items-center justify-center gap-2 h-10 px-3 rounded-xl border border-border text-sm font-medium hover:bg-secondary active:bg-secondary/80 transition-colors"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
-                <path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+          {/* ── Action bar: search + filter + primary + tools ── */}
+          <div className="flex flex-col sm:flex-row gap-2">
+            {/* Search */}
+            <div className="relative flex-1 min-w-0">
+              <svg
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden
+              >
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
               </svg>
-              <span>Importieren</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setScannerOpen(true)}
-              className="flex items-center justify-center gap-2 h-10 px-3 rounded-xl border border-border text-sm font-medium hover:bg-secondary active:bg-secondary/80 transition-colors"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <rect x="3" y="3" width="5" height="5" rx="1"/><rect x="16" y="3" width="5" height="5" rx="1"/>
-                <rect x="3" y="16" width="5" height="5" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/>
-                <path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/>
-                <path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/>
-                <path d="M12 21v-1"/>
-              </svg>
-              <span>Per QR-Code</span>
-            </button>
-            {teilnehmer.length > 0 && (
+              <input
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Suche…"
+                className="w-full h-10 pl-9 pr-9 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:bg-secondary transition-colors"
+                  aria-label="Suche löschen"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                  </svg>
+                </button>
+              )}
+            </div>
+
+            {/* Action row */}
+            <div className="flex gap-2 shrink-0">
+              {/* Group filter */}
+              <div className="relative flex-1 sm:flex-none" ref={filterMenuRef}>
+                <button
+                  type="button"
+                  onClick={() => setFilterMenuOpen((v) => !v)}
+                  aria-expanded={filterMenuOpen}
+                  className={`w-full sm:w-auto h-10 px-3 rounded-xl border text-sm font-medium flex items-center justify-between sm:justify-start gap-2 transition-colors ${
+                    filterGroup === "all"
+                      ? "border-border hover:bg-secondary"
+                      : "border-primary/40 bg-primary/5 text-primary"
+                  }`}
+                >
+                  {activeFilterGroup ? (
+                    <span
+                      className="w-2 h-2 rounded-full shrink-0"
+                      style={{ backgroundColor: activeFilterGroup.color ?? "#94a3b8" }}
+                    />
+                  ) : (
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
+                    </svg>
+                  )}
+                  <span className="truncate max-w-[140px]">
+                    {filterGroup === "all"
+                      ? "Gruppe"
+                      : filterGroup === "none"
+                        ? "Ohne Gruppe"
+                        : activeFilterGroup?.name ?? "Gruppe"}
+                  </span>
+                  <svg
+                    className={`shrink-0 transition-transform ${filterMenuOpen ? "rotate-180" : ""}`}
+                    width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden
+                  >
+                    <polyline points="6 9 12 15 18 9"/>
+                  </svg>
+                </button>
+                <AnimatePresence>
+                  {filterMenuOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.96, y: -4 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.96, y: -4 }}
+                      transition={{ duration: 0.14 }}
+                      className="absolute left-0 sm:right-0 sm:left-auto top-11 z-20 w-56 max-h-72 overflow-y-auto rounded-xl border border-border bg-popover shadow-lg py-1"
+                    >
+                      {[
+                        { key: "all", label: "Alle Gruppen", dot: null as string | null },
+                        { key: "none", label: "Ohne Gruppe", dot: null as string | null },
+                        ...groups.map((g) => ({ key: g.id, label: g.name, dot: g.color })),
+                      ].map((opt, i) => {
+                        const active = filterGroup === opt.key;
+                        return (
+                          <button
+                            key={opt.key}
+                            type="button"
+                            onClick={() => {
+                              setFilterGroup(opt.key);
+                              setFilterMenuOpen(false);
+                            }}
+                            className={`w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors text-left ${
+                              active ? "bg-secondary/60 font-semibold" : "hover:bg-secondary"
+                            } ${i === 2 ? "border-t border-border mt-1 pt-2" : ""}`}
+                          >
+                            <span
+                              className="w-2 h-2 rounded-full shrink-0"
+                              style={{
+                                backgroundColor: opt.dot ?? "transparent",
+                                border: opt.dot ? undefined : "1px dashed currentColor",
+                                opacity: opt.dot ? 1 : 0.4,
+                              }}
+                            />
+                            <span className="truncate">{opt.label}</span>
+                          </button>
+                        );
+                      })}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+
+              {/* Primary: Add */}
               <button
                 type="button"
-                onClick={handleBulkQRDownload}
-                disabled={zipLoading}
-                className="col-span-2 sm:col-span-1 flex items-center justify-center gap-2 h-10 px-3 rounded-xl border border-border text-sm font-medium hover:bg-secondary active:bg-secondary/80 transition-colors disabled:opacity-50"
+                onClick={() => setAddOpen(true)}
+                className="h-10 px-4 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 active:opacity-80 transition-opacity flex items-center gap-1.5 shrink-0"
               >
-                {zipLoading ? (
-                  <span className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                    <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-                  </svg>
-                )}
-                <span>Alle QR-Codes (.zip)</span>
-              </button>
-            )}
-          </div>
-
-          {/* Add single */}
-          <form onSubmit={handleAddSingle} className="flex gap-2">
-            <input
-              type="text"
-              value={addName}
-              onChange={(e) => setAddName(e.target.value)}
-              placeholder="Name eingeben…"
-              className="flex-1 h-11 px-3 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-            />
-            <button
-              type="submit"
-              disabled={!addName.trim() || addLoading}
-              className="h-11 px-5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold disabled:opacity-40 hover:opacity-90 active:opacity-80 transition-opacity flex items-center gap-2"
-            >
-              {addLoading ? (
-                <span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-              ) : (
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
                   <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
                 </svg>
-              )}
-              Hinzufügen
-            </button>
-          </form>
+                <span className="hidden sm:inline">Hinzufügen</span>
+                <span className="sm:hidden">Neu</span>
+              </button>
 
-          {/* Sort toggle + count */}
+              {/* Tools overflow menu */}
+              <div className="relative" ref={toolsMenuRef}>
+                <button
+                  type="button"
+                  onClick={() => setToolsOpen((v) => !v)}
+                  aria-expanded={toolsOpen}
+                  aria-label="Weitere Aktionen"
+                  className="h-10 w-10 rounded-xl border border-border text-muted-foreground hover:bg-secondary hover:text-foreground active:bg-secondary/80 transition-colors flex items-center justify-center shrink-0"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                    <circle cx="12" cy="5" r="1.6"/>
+                    <circle cx="12" cy="12" r="1.6"/>
+                    <circle cx="12" cy="19" r="1.6"/>
+                  </svg>
+                </button>
+                <AnimatePresence>
+                  {toolsOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.96, y: -4 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.96, y: -4 }}
+                      transition={{ duration: 0.14 }}
+                      className="absolute right-0 top-11 z-20 w-56 rounded-xl border border-border bg-popover shadow-lg py-1"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => { setToolsOpen(false); setBulkOpen(true); }}
+                        className="w-full text-left text-sm px-3 py-2 hover:bg-secondary transition-colors flex items-center gap-2.5"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground">
+                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                          <polyline points="14 2 14 8 20 8"/>
+                          <line x1="12" y1="18" x2="12" y2="12"/>
+                          <line x1="9" y1="15" x2="15" y2="15"/>
+                        </svg>
+                        Liste importieren
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setToolsOpen(false); setScannerOpen(true); }}
+                        className="w-full text-left text-sm px-3 py-2 hover:bg-secondary transition-colors flex items-center gap-2.5"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground">
+                          <rect x="3" y="3" width="5" height="5" rx="1"/><rect x="16" y="3" width="5" height="5" rx="1"/>
+                          <rect x="3" y="16" width="5" height="5" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/>
+                          <path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/>
+                          <path d="M12 16v.01"/><path d="M16 12h1"/>
+                        </svg>
+                        Per QR-Code scannen
+                      </button>
+                      <div className="h-px bg-border my-1" />
+                      <button
+                        type="button"
+                        onClick={() => { setToolsOpen(false); handleBulkQRDownload(); }}
+                        disabled={teilnehmer.length === 0 || zipLoading}
+                        className="w-full text-left text-sm px-3 py-2 hover:bg-secondary transition-colors flex items-center gap-2.5 disabled:opacity-40"
+                      >
+                        {zipLoading ? (
+                          <span className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                        ) : (
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                            <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                          </svg>
+                        )}
+                        Alle QR-Codes (.zip)
+                      </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            </div>
+          </div>
+
+          {/* Result meta-row */}
           {teilnehmer.length > 0 && (
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-muted-foreground">{teilnehmer.length} {teilnehmer.length === 1 ? "Person" : "Personen"}</p>
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span className="tabular-nums">
+                {filtered.length === teilnehmer.length
+                  ? `${teilnehmer.length} ${teilnehmer.length === 1 ? "Person" : "Personen"}`
+                  : `${filtered.length} von ${teilnehmer.length}`}
+              </span>
               <button
                 type="button"
-                onClick={() => setSortDir((d) => d === "asc" ? "desc" : "asc")}
-                className="flex items-center gap-1.5 h-7 px-2.5 rounded-lg border border-border text-xs font-medium hover:bg-secondary transition-colors"
+                onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
+                className="flex items-center gap-1.5 h-7 px-2.5 rounded-lg border border-border text-xs font-medium hover:bg-secondary transition-colors text-foreground/80"
               >
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                   {sortDir === "asc" ? (
@@ -540,71 +745,104 @@ export default function TeilnehmerPage() {
                 </svg>
               </div>
               <p className="font-semibold text-sm mb-1">Noch keine Teilnehmer</p>
-              <p className="text-sm text-muted-foreground">Füge einzelne hinzu oder importiere eine Liste.</p>
+              <p className="text-sm text-muted-foreground">Tippe auf &bdquo;Hinzuf&uuml;gen&ldquo;, um zu starten.</p>
             </div>
           ) : (
-            <div className="rounded-2xl border border-border overflow-hidden">
-              <AnimatePresence initial={false}>
-                {[...teilnehmer].sort((a, b) => sortDir === "asc" ? a.name.localeCompare(b.name, "de") : b.name.localeCompare(a.name, "de")).map((t, i) => {
-                  const myGroups = groupsOfTeilnehmer(t.id);
-                  const initials = t.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
-                  return (
-                    <motion.div
-                      key={t.id}
-                      initial={reduced ? false : { opacity: 0, y: 6 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, x: -20 }}
-                      transition={{ ...spring, delay: i < 20 ? i * 0.025 : 0 }}
-                      className="flex items-center gap-3 px-4 py-3 hover:bg-secondary/30 transition-colors border-b border-border last:border-b-0"
+            <div
+              className={`overflow-hidden ${
+                filtered.length === 0
+                  ? "rounded-2xl border border-dashed border-border"
+                  : "rounded-2xl border border-border"
+              }`}
+            >
+              {/* AnimatePresence stays mounted across the empty/non-empty
+                  transition so re-entries animate. mode="popLayout" pulls
+                  exiting items out of the flow immediately. */}
+              <AnimatePresence mode="popLayout">
+                {filtered.length === 0 ? (
+                  <motion.div
+                    key="no-matches"
+                    initial={reduced ? false : { opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    transition={{ duration: 0.18 }}
+                    className="text-center py-12 px-4"
+                  >
+                    <p className="font-semibold text-sm mb-1">Keine Treffer</p>
+                    <p className="text-sm text-muted-foreground">
+                      Passe Suche oder Filter an.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => { setSearch(""); setFilterGroup("all"); }}
+                      className="mt-3 text-xs font-medium text-primary hover:underline"
                     >
-                      {/* Avatar */}
-                      <div className="w-9 h-9 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold shrink-0">
-                        {initials}
-                      </div>
+                      Filter zur&uuml;cksetzen
+                    </button>
+                  </motion.div>
+                ) : (
+                  filtered.map((t, i) => {
+                    const myGroups = groupsOfTeilnehmer(t.id);
+                    const initials = t.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
+                    return (
+                      <motion.div
+                        key={t.id}
+                        layout
+                        initial={reduced ? false : { opacity: 0, y: 6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, x: -20 }}
+                        transition={{ ...spring, delay: i < 20 ? i * 0.02 : 0 }}
+                        className="flex items-center gap-3 px-4 py-3 hover:bg-secondary/30 transition-colors border-b border-border last:border-b-0"
+                      >
+                        {/* Avatar */}
+                        <div className="w-9 h-9 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold shrink-0">
+                          {initials}
+                        </div>
 
-                      {/* Name + groups */}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium leading-tight truncate">{t.name}</p>
-                        {myGroups.length > 0 && (
-                          <div className="flex flex-wrap gap-1 mt-1">
-                            {myGroups.map((g) => (
-                              <span
-                                key={g.id}
-                                className="inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded-full leading-none"
-                                style={{ backgroundColor: `${g.color}20`, color: g.color ?? undefined, border: `1px solid ${g.color}40` }}
-                              >
-                                {g.name}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
+                        {/* Name + groups */}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium leading-tight truncate">{t.name}</p>
+                          {myGroups.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {myGroups.map((g) => (
+                                <span
+                                  key={g.id}
+                                  className="inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded-full leading-none"
+                                  style={{ backgroundColor: `${g.color}20`, color: g.color ?? undefined, border: `1px solid ${g.color}40` }}
+                                >
+                                  {g.name}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
 
-                      {/* Actions — always visible, touch-friendly */}
-                      <div className="flex items-center gap-0.5 shrink-0">
-                        <IconBtn onClick={() => setQrViewId(t.id)} title="QR-Code anzeigen">
-                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <rect x="3" y="3" width="5" height="5" rx="1"/><rect x="16" y="3" width="5" height="5" rx="1"/>
-                            <rect x="3" y="16" width="5" height="5" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/>
-                            <path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/>
-                          </svg>
-                        </IconBtn>
-                        <IconBtn
-                          onClick={() => setDeleteTarget({ id: t.id, name: t.name })}
-                          title="Löschen"
-                          danger
-                        >
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <polyline points="3 6 5 6 21 6"/>
-                            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
-                            <path d="M10 11v6M14 11v6"/>
-                            <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
-                          </svg>
-                        </IconBtn>
-                      </div>
-                    </motion.div>
-                  );
-                })}
+                        {/* Actions — always visible, touch-friendly */}
+                        <div className="flex items-center gap-0.5 shrink-0">
+                          <IconBtn onClick={() => setQrViewId(t.id)} title="QR-Code anzeigen">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <rect x="3" y="3" width="5" height="5" rx="1"/><rect x="16" y="3" width="5" height="5" rx="1"/>
+                              <rect x="3" y="16" width="5" height="5" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/>
+                              <path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/>
+                            </svg>
+                          </IconBtn>
+                          <IconBtn
+                            onClick={() => setDeleteTarget({ id: t.id, name: t.name })}
+                            title="Löschen"
+                            danger
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="3 6 5 6 21 6"/>
+                              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                              <path d="M10 11v6M14 11v6"/>
+                              <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+                            </svg>
+                          </IconBtn>
+                        </div>
+                      </motion.div>
+                    );
+                  })
+                )}
               </AnimatePresence>
             </div>
           )}
@@ -859,6 +1097,93 @@ export default function TeilnehmerPage() {
           )}
         </div>
       )}
+
+      {/* ══ ADD TEILNEHMER SHEET ════════════════════════════════════════════ */}
+      <BottomSheet
+        open={addOpen}
+        onClose={() => { if (!addLoading) { setAddOpen(false); setAddName(""); setAddGroupIds(new Set()); } }}
+        title="Teilnehmer hinzufügen"
+      >
+        <form onSubmit={handleAddTeilnehmer} className="space-y-4">
+          <div>
+            <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+              Name
+            </label>
+            <input
+              type="text"
+              value={addName}
+              onChange={(e) => setAddName(e.target.value)}
+              placeholder="Voller Name"
+              autoFocus
+              className="mt-1.5 w-full h-11 px-3 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          </div>
+
+          {groups.length > 0 && (
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                Gruppen
+                <span className="ml-1 font-normal normal-case text-muted-foreground/60">
+                  (optional)
+                </span>
+              </label>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {groups.map((g) => {
+                  const selected = addGroupIds.has(g.id);
+                  return (
+                    <button
+                      key={g.id}
+                      type="button"
+                      onClick={() => toggleAddGroup(g.id)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors"
+                      style={
+                        selected
+                          ? {
+                              backgroundColor: `${g.color}20`,
+                              borderColor: g.color ?? "transparent",
+                              color: g.color ?? undefined,
+                            }
+                          : {
+                              backgroundColor: "transparent",
+                              borderColor: "var(--border)",
+                              color: undefined,
+                            }
+                      }
+                    >
+                      <span
+                        className="w-2 h-2 rounded-full"
+                        style={{ backgroundColor: g.color ?? "#94a3b8" }}
+                      />
+                      {g.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div className="flex gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => { setAddOpen(false); setAddName(""); setAddGroupIds(new Set()); }}
+              disabled={addLoading}
+              className="flex-1 h-11 rounded-xl border border-border text-sm font-medium hover:bg-secondary transition-colors disabled:opacity-50"
+            >
+              Abbrechen
+            </button>
+            <button
+              type="submit"
+              disabled={!addName.trim() || addLoading}
+              className="flex-1 h-11 rounded-xl bg-primary text-primary-foreground text-sm font-semibold disabled:opacity-40 hover:opacity-90 transition-opacity flex items-center justify-center gap-2"
+            >
+              {addLoading && (
+                <span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+              )}
+              Hinzufügen
+            </button>
+          </div>
+        </form>
+      </BottomSheet>
 
       {/* ══ BULK IMPORT SHEET ═══════════════════════════════════════════════ */}
       <BottomSheet open={bulkOpen} onClose={() => { setBulkOpen(false); setBulkText(""); }} title="Mehrere importieren">

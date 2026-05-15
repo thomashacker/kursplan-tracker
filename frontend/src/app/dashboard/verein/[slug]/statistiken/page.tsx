@@ -2,9 +2,12 @@ import { createClient } from "@/lib/supabase/server";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import type { Club, ClubMembership } from "@/types";
-import { getCurrentMonday, offsetWeek, formatDate } from "@/lib/utils/date";
+import { formatDate, getSessionDate, toISODate } from "@/lib/utils/date";
 import TimeWindowPicker, { type TimeWindow } from "./TimeWindowPicker";
 import { GroupAttendanceAccordion } from "./GroupAttendanceAccordion";
+import { ActivityChart, type DailyPoint, type WeekdayPoint } from "./ActivityChart";
+import { CollapsibleSection } from "./CollapsibleSection";
+import { windowRange, mondayOnOrBefore } from "./dateRange";
 
 // ── helpers ───────────────────────────────────────────────────
 
@@ -20,27 +23,11 @@ function fmtHours(minutes: number): string {
   return m === 0 ? `${h}h` : `${h}h ${m}m`;
 }
 
-function shortWeek(iso: string): string {
-  const [, month, day] = iso.split("-");
-  return `${day}.${month}.`;
-}
-
-const DAY_SHORT = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
-
-const WINDOW_WEEKS: Record<TimeWindow, number> = {
-  "1w": 1,
-  "1m": 4,
-  "3m": 13,
-  "6m": 26,
-  "1y": 52,
-};
-
 const WINDOW_LABELS: Record<TimeWindow, string> = {
-  "1w": "letzte Woche",
-  "1m": "letzter Monat",
-  "3m": "letzte 3 Monate",
-  "6m": "letzte 6 Monate",
-  "1y": "letztes Jahr",
+  current_month: "dieser Monat",
+  last_month:    "letzter Monat",
+  "6m":          "letzte 6 Monate",
+  "1y":          "letztes Jahr",
 };
 
 // ── page ──────────────────────────────────────────────────────
@@ -56,9 +43,9 @@ export default async function StatistikenPage({
   const { window: windowParam } = await searchParams;
 
   const activeWindow: TimeWindow =
-    windowParam && windowParam in WINDOW_WEEKS
+    windowParam && windowParam in WINDOW_LABELS
       ? (windowParam as TimeWindow)
-      : "1m";
+      : "current_month";
 
   const supabase = await createClient();
 
@@ -82,26 +69,41 @@ export default async function StatistikenPage({
 
   if (!membership || membership.role === "member") notFound();
 
-  const currentMonday = getCurrentMonday();
-  const fromMonday = offsetWeek(currentMonday, -WINDOW_WEEKS[activeWindow]);
+  const { from, to } = windowRange(activeWindow);
+  const fromMondayISO = mondayOnOrBefore(from);
+  const toMondayISO   = mondayOnOrBefore(to);
+  // `to` is set when the window is computed (start of request); sessions
+  // ending after this point are excluded. Sufficient cutoff in all cases:
+  // for "current_month"/"6m"/"1y", `to === new Date()` at request start;
+  // for "last_month", `to` is the end of the previous calendar month.
+  const cutoffMs = to.getTime();
+  const fromMs   = from.getTime();
 
-  // Fetch weeks within the selected window, with extended session fields
+  // Fetch weeks that could contain in-range sessions. Session-level filtering
+  // narrows down to those whose end-time falls within [from, to].
   const { data: pastWeeks } = await supabase
     .from("training_weeks")
     .select(
       "week_start, training_sessions(id, time_start, time_end, is_cancelled, day_of_week, topics, session_types, session_trainers(user_id, virtual_trainer_id))",
     )
     .eq("club_id", club.id)
-    .lt("week_start", currentMonday)
-    .gte("week_start", fromMonday)
+    .gte("week_start", fromMondayISO)
+    .lte("week_start", toMondayISO)
     .order("week_start", { ascending: false });
+
+  function isInRange(weekStart: string, dayOfWeek: number, timeEnd: string): boolean {
+    const d = getSessionDate(weekStart, dayOfWeek);
+    const [h, m] = timeEnd.split(":").map(Number);
+    d.setHours(h, m, 0, 0);
+    const t = d.getTime();
+    return t >= fromMs && t <= cutoffMs;
+  }
 
   // ── Aggregate ────────────────────────────────────────────────
 
   type TrainerStat = { sessions: number; minutes: number; lastWeek: string };
   const trainerMap = new Map<string, TrainerStat>(); // real user ids
   const virtualTrainerMap = new Map<string, TrainerStat>(); // virtual trainer ids
-  const weekCountMap = new Map<string, number>();
 
   let totalSessions = 0;
   let totalMinutes = 0;
@@ -127,9 +129,12 @@ export default async function StatistikenPage({
           virtual_trainer_id: string | null;
         }[];
       })[]
-    ).filter((s) => !s.is_cancelled);
+    ).filter(
+      (s) =>
+        !s.is_cancelled &&
+        isInRange(week.week_start, s.day_of_week, s.time_end),
+    );
 
-    weekCountMap.set(week.week_start, sessions.length);
     totalSessions += sessions.length;
 
     for (const s of sessions) {
@@ -214,15 +219,6 @@ export default async function StatistikenPage({
 
   const maxSessions = trainerRows[0]?.sessions ?? 1;
 
-  // Chart bars
-  const numBars = WINDOW_WEEKS[activeWindow];
-  const chartBars = Array.from({ length: numBars }, (_, i) => {
-    const ws = offsetWeek(currentMonday, -(numBars - 1 - i));
-    return { ws, count: weekCountMap.get(ws) ?? 0 };
-  });
-  const maxWeekCount = Math.max(...chartBars.map((w) => w.count), 1);
-  const showChartLabels = numBars <= 13;
-
   // ── Attendance data ──────────────────────────────────────────
 
   const { data: attendanceRows } = pastSessionIds.length
@@ -263,16 +259,42 @@ export default async function StatistikenPage({
     }
   }
 
-  // ── Day-of-week attendance chart ─────────────────────────────
-  // 0=Mon … 6=Sun
-  const dayCheckIns = new Array(7).fill(0);
-  const daySessionCount = new Array(7).fill(0);
+  // ── Activity chart series (daily timeline + weekday bucket) ──
+  const dailyAggMap = new Map<string, { sessions: number; checkIns: number }>();
+  const dayCheckIns = new Array(7).fill(0) as number[];
+  const daySessionCount = new Array(7).fill(0) as number[];
+
   for (const s of allSessions) {
     const dow = s.day_of_week ?? 0;
+    const sCheckIns = sessionCheckInMap.get(s.id) ?? 0;
     daySessionCount[dow]++;
-    dayCheckIns[dow] += sessionCheckInMap.get(s.id) ?? 0;
+    dayCheckIns[dow] += sCheckIns;
+
+    const iso = toISODate(getSessionDate(s.week_start, s.day_of_week));
+    const prev = dailyAggMap.get(iso) ?? { sessions: 0, checkIns: 0 };
+    dailyAggMap.set(iso, {
+      sessions: prev.sessions + 1,
+      checkIns: prev.checkIns + sCheckIns,
+    });
   }
-  const maxDayCheckIns = Math.max(...dayCheckIns, 1);
+
+  // Zero-fill the daily series from `from` to the cutoff (inclusive, date-only)
+  const dailySeries: DailyPoint[] = [];
+  const cursor = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+  const endDateOnly = new Date(cutoffMs);
+  endDateOnly.setHours(0, 0, 0, 0);
+  while (cursor.getTime() <= endDateOnly.getTime()) {
+    const iso = toISODate(cursor);
+    const v = dailyAggMap.get(iso) ?? { sessions: 0, checkIns: 0 };
+    dailySeries.push({ dateISO: iso, ...v });
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  const weekdaySeries: WeekdayPoint[] = Array.from({ length: 7 }, (_, dow) => ({
+    dow,
+    sessions: daySessionCount[dow],
+    checkIns: dayCheckIns[dow],
+  }));
 
   // ── Topic & Trainingsart attendance ──────────────────────────
   type TagStat = { sessions: number; checkIns: number };
@@ -309,6 +331,7 @@ export default async function StatistikenPage({
       ...stat,
       avg: stat.sessions > 0 ? stat.checkIns / stat.sessions : 0,
     }))
+    .filter((row) => row.checkIns > 0)
     .sort((a, b) => b.checkIns - a.checkIns);
 
   const typeRows = [...typeMap.entries()]
@@ -317,6 +340,7 @@ export default async function StatistikenPage({
       ...stat,
       avg: stat.sessions > 0 ? stat.checkIns / stat.sessions : 0,
     }))
+    .filter((row) => row.checkIns > 0)
     .sort((a, b) => b.checkIns - a.checkIns);
 
   const maxTopicCheckIns = topicRows[0]?.checkIns ?? 1;
@@ -425,8 +449,38 @@ export default async function StatistikenPage({
   groupStats.sort((a, b) => b.rate - a.rate);
   const hasGroupStats = groupStats.length > 0;
 
+  // ── Club-wide totals (independent of the time window) ────────
+  const { count: totalTeilnehmer } = await supabase
+    .from("teilnehmer")
+    .select("*", { count: "exact", head: true })
+    .eq("club_id", club.id);
+  const groupCount = teilnehmerGroups?.length ?? 0;
+
+  const hasAttendanceDetail =
+    hasAttendanceData &&
+    (hasGroupStats || topicRows.length > 0 || typeRows.length > 0);
+  const hasTrainerDetail = trainerRows.length > 0;
+
+  const kpis: {
+    label: string;
+    value: React.ReactNode;
+    accent?: string;
+  }[] = [
+    { label: "Trainings", value: totalSessions },
+    { label: "Stunden", value: fmtHours(totalMinutes) },
+    {
+      label: "Check-ins",
+      value: totalCheckIns,
+      accent: hasAttendanceData ? "text-green-600 dark:text-green-400" : "",
+    },
+    { label: "Unique Check-ins", value: uniqueParticipants },
+    { label: "Ø pro Training", value: avgCheckIns ?? "—" },
+    { label: "Teilnehmer", value: totalTeilnehmer ?? 0 },
+    { label: "Gruppen", value: groupCount },
+  ];
+
   return (
-    <div className="space-y-10 pb-10">
+    <div className="space-y-8 pb-10">
       {/* ── Header + time window picker ──────────────────────── */}
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
         <div>
@@ -445,342 +499,222 @@ export default async function StatistikenPage({
         </Suspense>
       </div>
 
-      {/* ── KPI cards ──────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 gap-3">
-        {[
-          { label: "Trainings", value: totalSessions },
-          { label: "Trainingsstunden", value: fmtHours(totalMinutes) },
-        ].map(({ label, value }) => (
+      {/* ── KPI grid (7 cards) ──────────────────────────────── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
+        {kpis.map((k, i, arr) => (
           <div
-            key={label}
-            className="rounded-2xl border border-border bg-card p-5"
+            key={k.label}
+            className={`rounded-2xl border border-border bg-card p-4 sm:p-5 ${
+              i === arr.length - 1 ? "col-span-2 md:col-span-1" : ""
+            }`}
           >
-            <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-2">
-              {label}
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1.5 leading-tight">
+              {k.label}
             </p>
             <p
-              className="text-3xl font-bold leading-none"
+              className={`text-2xl sm:text-3xl font-bold leading-none tabular-nums ${k.accent ?? ""}`}
               style={{ fontFamily: "var(--font-syne, system-ui)" }}
             >
-              {value}
+              {k.value}
             </p>
           </div>
         ))}
       </div>
 
-      {/* ── Attendance KPI cards ──────────────────────────────── */}
-      {hasAttendanceData && (
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-4">
-            Anwesenheit
-          </p>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-2xl border border-border bg-card p-5">
-              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-2">
-                Check-ins gesamt
-              </p>
-              <p
-                className="text-3xl font-bold leading-none text-green-600"
-                style={{ fontFamily: "var(--font-syne, system-ui)" }}
-              >
-                {totalCheckIns}
-              </p>
-              <p className="text-xs text-muted-foreground mt-2">
-                von {uniqueParticipants}{" "}
-                {uniqueParticipants === 1 ? "Teilnehmer" : "Teilnehmern"}
-              </p>
-            </div>
-            <div className="rounded-2xl border border-border bg-card p-5">
-              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-2">
-                Ø pro Training
-              </p>
-              <p
-                className="text-3xl font-bold leading-none"
-                style={{ fontFamily: "var(--font-syne, system-ui)" }}
-              >
-                {avgCheckIns ?? "—"}
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* ── Activity chart (trainings + check-ins) ─────────── */}
+      <ActivityChart
+        daily={dailySeries}
+        weekday={weekdaySeries}
+        hasAttendance={hasAttendanceData}
+      />
 
-      {/* ── Group attendance rates ────────────────────────────── */}
-      {hasGroupStats && (
-        <section>
-          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-4">
-            Anwesenheitsquote nach Gruppe
-          </p>
-          <GroupAttendanceAccordion groups={groupStats} sessionIds={pastSessionIds} />
-        </section>
-      )}
-
-      {totalSessions === 0 ? (
-        <div className="text-center py-16 rounded-2xl border border-border">
-          <p className="font-semibold text-base mb-1">
-            Keine Trainings im gewählten Zeitraum
-          </p>
-          <p className="text-sm text-muted-foreground">
-            Wähle einen längeren Zeitraum oder warte auf vergangene Wochen.
-          </p>
-        </div>
-      ) : (
-        <>
-          {/* ── Day-of-week attendance chart ─────────────────── */}
-          {hasAttendanceData && (
-            <section>
-              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-4">
-                Anwesenheit nach Wochentag{" "}
-                <span className="normal-case font-normal">
-                  (Anzahl Check-ins)
-                </span>
+      {/* ── Attendance details (collapsible) ────────────────── */}
+      {hasAttendanceDetail && (
+        <CollapsibleSection title="Anwesenheit · Details" defaultOpen={true}>
+          {hasGroupStats && (
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/70 mb-3">
+                Anwesenheitsquote nach Gruppe
               </p>
-              <div className="rounded-2xl border border-border bg-card p-6">
-                <div className="flex items-end gap-2 h-28">
-                  {DAY_SHORT.map((label, dow) => {
-                    const count = dayCheckIns[dow];
-                    const sessions = daySessionCount[dow];
-                    return (
-                      <div
-                        key={dow}
-                        className="flex-1 flex flex-col items-center gap-1.5 group"
-                      >
-                        <span className="text-[10px] font-medium text-primary leading-none">
-                          {count > 0 ? count : ""}
-                        </span>
-                        <div
-                          title={`${count} Check-ins, ${sessions} Sessions`}
-                          className={`w-full rounded-t-md transition-colors ${
-                            count > 0
-                              ? "bg-green-500/70 group-hover:bg-green-500"
-                              : "bg-secondary"
-                          }`}
-                          style={{
-                            height: `${Math.max((count / maxDayCheckIns) * 80, count > 0 ? 6 : 2)}px`,
-                          }}
-                        />
-                        <span className="text-[9px] text-muted-foreground leading-none">
-                          {label}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </section>
+              <GroupAttendanceAccordion
+                groups={groupStats}
+                sessionIds={pastSessionIds}
+              />
+            </div>
           )}
 
-          {/* ── Attendance by topic ───────────────────────────── */}
-          {hasAttendanceData && topicRows.length > 0 && (
-            <section>
-              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-4">
+          {topicRows.length > 0 && (
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/70 mb-3">
                 Anwesenheit nach Thema
               </p>
               <div className="rounded-2xl border border-border bg-card overflow-hidden">
                 <div className="overflow-y-auto max-h-64 divide-y divide-border">
-                {topicRows.map((t) => (
-                  <div
-                    key={t.label}
-                    className="px-5 py-4 flex items-center gap-4"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold truncate">
-                        {t.label}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {t.sessions} Session{t.sessions !== 1 ? "s" : ""}
-                      </p>
-                    </div>
-                    <div className="hidden sm:block w-32">
-                      <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-primary/60 rounded-full"
-                          style={{
-                            width: `${(t.checkIns / maxTopicCheckIns) * 100}%`,
-                          }}
-                        />
+                  {topicRows.map((t) => (
+                    <div
+                      key={t.label}
+                      className="px-5 py-4 flex items-center gap-4"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold truncate">
+                          {t.label}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {t.sessions} Session{t.sessions !== 1 ? "s" : ""}
+                        </p>
+                      </div>
+                      <div className="hidden sm:block w-32">
+                        <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-primary/60 rounded-full"
+                            style={{
+                              width: `${(t.checkIns / maxTopicCheckIns) * 100}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="text-sm font-bold text-green-600">
+                          {t.checkIns}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                          Check-ins
+                        </p>
+                      </div>
+                      <div className="text-right shrink-0 w-12">
+                        <p className="text-sm font-bold">{t.avg.toFixed(1)}</p>
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                          Ø
+                        </p>
                       </div>
                     </div>
-                    <div className="text-right shrink-0">
-                      <p className="text-sm font-bold text-green-600">
-                        {t.checkIns}
-                      </p>
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
-                        Check-ins
-                      </p>
-                    </div>
-                    <div className="text-right shrink-0 w-12">
-                      <p className="text-sm font-bold">{t.avg.toFixed(1)}</p>
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
-                        Ø
-                      </p>
-                    </div>
-                  </div>
-                ))}
+                  ))}
                 </div>
               </div>
-            </section>
+            </div>
           )}
 
-          {/* ── Attendance by Trainingsart ────────────────────── */}
-          {hasAttendanceData && typeRows.length > 0 && (
-            <section>
-              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-4">
+          {typeRows.length > 0 && (
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/70 mb-3">
                 Anwesenheit nach Trainingsart
               </p>
               <div className="rounded-2xl border border-border bg-card overflow-hidden">
                 <div className="overflow-y-auto max-h-64 divide-y divide-border">
-                {typeRows.map((t) => (
-                  <div
-                    key={t.label}
-                    className="px-5 py-4 flex items-center gap-4"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold truncate">
-                        {t.label}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {t.sessions} Session{t.sessions !== 1 ? "s" : ""}
-                      </p>
-                    </div>
-                    <div className="hidden sm:block w-32">
-                      <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-primary/60 rounded-full"
-                          style={{
-                            width: `${(t.checkIns / maxTypeCheckIns) * 100}%`,
-                          }}
-                        />
+                  {typeRows.map((t) => (
+                    <div
+                      key={t.label}
+                      className="px-5 py-4 flex items-center gap-4"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold truncate">
+                          {t.label}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {t.sessions} Session{t.sessions !== 1 ? "s" : ""}
+                        </p>
+                      </div>
+                      <div className="hidden sm:block w-32">
+                        <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-primary/60 rounded-full"
+                            style={{
+                              width: `${(t.checkIns / maxTypeCheckIns) * 100}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="text-sm font-bold text-green-600">
+                          {t.checkIns}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                          Check-ins
+                        </p>
+                      </div>
+                      <div className="text-right shrink-0 w-12">
+                        <p className="text-sm font-bold">{t.avg.toFixed(1)}</p>
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                          Ø
+                        </p>
                       </div>
                     </div>
-                    <div className="text-right shrink-0">
-                      <p className="text-sm font-bold text-green-600">
-                        {t.checkIns}
-                      </p>
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
-                        Check-ins
-                      </p>
-                    </div>
-                    <div className="text-right shrink-0 w-12">
-                      <p className="text-sm font-bold">{t.avg.toFixed(1)}</p>
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
-                        Ø
-                      </p>
-                    </div>
-                  </div>
-                ))}
+                  ))}
                 </div>
               </div>
-            </section>
+            </div>
           )}
+        </CollapsibleSection>
+      )}
 
-          {/* ── Weekly activity chart ─────────────────────────── */}
-          <section>
-            <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-4">
-              Wöchentliche Aktivität{" "}
-              <span className="normal-case font-normal">
-                (Anzahl Trainings)
-              </span>
-            </p>
-            <div className="rounded-2xl border border-border bg-card p-6">
-              <div className="flex items-end gap-px sm:gap-1 h-28 overflow-hidden">
-                {chartBars.map(({ ws, count }) => (
-                  <div
-                    key={ws}
-                    className="flex-1 flex flex-col items-center gap-1 group min-w-0"
-                  >
-                    <span className="text-[10px] font-medium text-primary leading-none">
-                      {count > 0 ? count : ""}
+      {/* ── Trainer details (collapsible) ──────────────────── */}
+      {hasTrainerDetail && (
+        <CollapsibleSection
+          title="Trainer · Details"
+          count={trainerRows.length}
+          defaultOpen={false}
+        >
+          <div className="rounded-2xl border border-border bg-card overflow-hidden">
+            <div className="overflow-y-auto max-h-96 divide-y divide-border">
+              {trainerRows.map((t, i) => (
+                <div
+                  key={t.id}
+                  className="px-5 py-4 flex items-center gap-4"
+                >
+                  <span className="text-xs font-bold text-muted-foreground/40 w-5 shrink-0 text-right">
+                    {i + 1}
+                  </span>
+                  <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                    <span className="text-xs font-bold text-primary">
+                      {t.name
+                        .split(" ")
+                        .map((n: string) => n[0])
+                        .join("")
+                        .slice(0, 2)
+                        .toUpperCase()}
                     </span>
-                    <div
-                      className={`w-full rounded-t-sm transition-colors ${count > 0 ? "bg-primary/70 group-hover:bg-primary" : "bg-secondary"}`}
-                      style={{
-                        height: `${Math.max((count / maxWeekCount) * 80, count > 0 ? 6 : 2)}px`,
-                      }}
-                    />
-                    {showChartLabels && (
-                      <span className="text-[8px] sm:text-[9px] text-muted-foreground leading-none truncate w-full text-center">
-                        {shortWeek(ws)}
-                      </span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold leading-tight truncate">
+                      {t.name}
+                    </p>
+                    {t.lastWeek && (
+                      <p className="text-xs text-muted-foreground">
+                        Zuletzt: {formatDate(t.lastWeek)}
+                      </p>
                     )}
                   </div>
-                ))}
-              </div>
-              {!showChartLabels && (
-                <p className="text-[10px] text-muted-foreground text-center mt-3">
-                  {shortWeek(chartBars[0]?.ws ?? "")} –{" "}
-                  {shortWeek(chartBars[chartBars.length - 1]?.ws ?? "")}
-                </p>
-              )}
-            </div>
-          </section>
-
-          {/* ── Trainer breakdown ─────────────────────────────── */}
-          {trainerRows.length > 0 && (
-            <section>
-              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-4">
-                Trainer-Übersicht
-              </p>
-              <div className="rounded-2xl border border-border bg-card overflow-hidden">
-                <div className="overflow-y-auto max-h-64 divide-y divide-border">
-                {trainerRows.map((t, i) => (
-                  <div key={t.id} className="px-5 py-4 flex items-center gap-4">
-                    <span className="text-xs font-bold text-muted-foreground/40 w-5 shrink-0 text-right">
-                      {i + 1}
-                    </span>
-                    <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                      <span className="text-xs font-bold text-primary">
-                        {t.name
-                          .split(" ")
-                          .map((n: string) => n[0])
-                          .join("")
-                          .slice(0, 2)
-                          .toUpperCase()}
-                      </span>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold leading-tight truncate">
-                        {t.name}
-                      </p>
-                      {t.lastWeek && (
-                        <p className="text-xs text-muted-foreground">
-                          Zuletzt: {formatDate(t.lastWeek)}
-                        </p>
-                      )}
-                    </div>
-                    <div className="hidden sm:block flex-1 max-w-[180px]">
-                      <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-primary rounded-full transition-all"
-                          style={{
-                            width: `${(t.sessions / maxSessions) * 100}%`,
-                          }}
-                        />
-                      </div>
-                    </div>
-                    <div className="flex gap-4 shrink-0 text-right">
-                      <div>
-                        <p className="text-sm font-bold">{t.sessions}</p>
-                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
-                          Sessions
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-sm font-bold">
-                          {fmtHours(t.minutes)}
-                        </p>
-                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
-                          Stunden
-                        </p>
-                      </div>
+                  <div className="hidden sm:block flex-1 max-w-[180px]">
+                    <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-primary rounded-full transition-all"
+                        style={{
+                          width: `${(t.sessions / maxSessions) * 100}%`,
+                        }}
+                      />
                     </div>
                   </div>
-                ))}
+                  <div className="flex gap-4 shrink-0 text-right">
+                    <div>
+                      <p className="text-sm font-bold">{t.sessions}</p>
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                        Sessions
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold">
+                        {fmtHours(t.minutes)}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                        Stunden
+                      </p>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </section>
-          )}
-        </>
+              ))}
+            </div>
+          </div>
+        </CollapsibleSection>
       )}
     </div>
   );

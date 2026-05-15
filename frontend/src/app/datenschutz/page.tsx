@@ -41,7 +41,7 @@ export default function DatenschutzPage() {
               Bereitstellung unserer Applikation verarbeiten.
             </p>
             <p>Die verwendeten Begriffe sind nicht geschlechtsspezifisch.</p>
-            <p className="text-foreground/60">Stand: 25. April 2026</p>
+            <p className="text-foreground/60">Stand: 15. Mai 2026</p>
           </div>
         </section>
 
@@ -61,7 +61,9 @@ export default function DatenschutzPage() {
               { href: "#speicherung", label: "Allgemeine Informationen zur Datenspeicherung und Löschung" },
               { href: "#rechte", label: "Rechte der betroffenen Personen" },
               { href: "#webhosting", label: "Bereitstellung des Onlineangebots und Webhosting" },
+              { href: "#minderjaehrige", label: "Besondere Hinweise für minderjährige Nutzer" },
               { href: "#registrierung", label: "Registrierung, Anmeldung und Nutzerkonto" },
+              { href: "#vereinsmitglieder", label: "Verarbeitung von Vereinsmitgliederdaten" },
               { href: "#aenderung", label: "Änderung und Aktualisierung" },
               { href: "#begriffe", label: "Begriffsdefinitionen" },
             ].map(({ href, label }) => (
@@ -216,9 +218,10 @@ export default function DatenschutzPage() {
           <p className="text-sm leading-relaxed text-muted-foreground">
             Im Rahmen unserer Verarbeitung von personenbezogenen Daten werden Daten an
             folgende Dienstleister übermittelt: <strong className="text-foreground">Render Services, Inc.</strong>{" "}
-            (Hosting des Frontends) und <strong className="text-foreground">Supabase Inc.</strong>{" "}
-            (Datenbankbetrieb, Server in der EU). Mit beiden Dienstleistern bestehen
-            Auftragsverarbeitungsverträge gemäß Art.&nbsp;28 DSGVO.
+            (Hosting des Frontends, Server in der EU), <strong className="text-foreground">Supabase Inc.</strong>{" "}
+            (Datenbankbetrieb, Server in der EU) und <strong className="text-foreground">Porkbun
+            (Top Notch Server Solutions, Inc.)</strong> (Domain-Registrierung, DNS und E-Mail-Weiterleitung).
+            Mit allen Dienstleistern bestehen Auftragsverarbeitungsverträge gemäß Art.&nbsp;28 DSGVO.
           </p>
         </section>
 
@@ -310,19 +313,20 @@ export default function DatenschutzPage() {
             </p>
             <p>
               Das Frontend wird über <strong className="text-foreground">Render Services, Inc.</strong>{" "}
-              (San Francisco, CA, USA) gehostet. Render
-              verarbeitet dabei Zugriffsdaten (IP-Adresse, Zeitstempel, aufgerufene Seiten) zum
-              Zweck der Auslieferung und Absicherung des Dienstes. Mit Render besteht ein
-              Auftragsverarbeitungsvertrag. Weitere Informationen:{" "}
+              (San Francisco, CA, USA) gehostet. Der genutzte Server befindet sich in der
+              Europäischen Union (Frankfurt, Deutschland). Render verarbeitet dabei Zugriffsdaten
+              (IP-Adresse, Zeitstempel, aufgerufene Seiten) zum Zweck der Auslieferung und
+              Absicherung des Dienstes. Mit Render besteht ein Auftragsverarbeitungsvertrag
+              gemäß Art.&nbsp;28 DSGVO (
               <a
-                href="https://render.com/privacy"
+                href="https://render.com/dpa"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="underline underline-offset-2 text-foreground hover:opacity-70 transition-opacity"
               >
-                render.com/privacy
+                render.com/dpa
               </a>
-              .
+              ).
             </p>
             <p>
               Die Datenbank wird über <strong className="text-foreground">Supabase</strong>{" "}
@@ -331,6 +335,24 @@ export default function DatenschutzPage() {
               verarbeitet personenbezogene Daten ausschließlich im Rahmen der Bereitstellung
               der Datenbankinfrastruktur. Mit Supabase besteht ein Auftragsverarbeitungsvertrag
               gemäß Art.&nbsp;28 DSGVO.
+            </p>
+            <p>
+              Domain-Registrierung, DNS und E-Mail-Weiterleitung erfolgen über{" "}
+              <strong className="text-foreground">Porkbun (Top Notch Server Solutions, Inc.)</strong>{" "}
+              mit Sitz in Wilsonville, Oregon, USA. Porkbun verarbeitet im Rahmen dieser
+              Dienste insbesondere die für die Auflösung von DNS-Anfragen und das Routing von
+              E-Mails technisch erforderlichen Daten (z.&nbsp;B. IP-Adressen, Absender- und
+              Empfängeradressen). Mit Porkbun besteht ein Auftragsverarbeitungsvertrag gemäß
+              Art.&nbsp;28 DSGVO. Weitere Informationen:{" "}
+              <a
+                href="https://porkbun.com/privacy"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline underline-offset-2 text-foreground hover:opacity-70 transition-opacity"
+              >
+                porkbun.com/privacy
+              </a>
+              .
             </p>
             <dl className="space-y-2">
               <div>
@@ -362,6 +384,43 @@ export default function DatenschutzPage() {
                 </dd>
               </div>
             </dl>
+          </div>
+        </section>
+
+        {/* Besondere Hinweise für minderjährige Nutzer */}
+        <section id="minderjaehrige" className="space-y-3 scroll-mt-6">
+          <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+            Besondere Hinweise für minderjährige Nutzer
+          </h2>
+          <div className="text-sm leading-relaxed text-muted-foreground space-y-3">
+            <p>
+              Die Nutzung von Kurs.Y ist auch für Minderjährige möglich, zum Beispiel im Rahmen
+              von Jugendabteilungen in Sportvereinen. Für Kinder und Jugendliche unter 16 Jahren
+              ist gemäß Art.&nbsp;8 DSGVO die Einwilligung eines Erziehungsberechtigten
+              erforderlich.
+            </p>
+            <p>
+              Minderjährige unter 16 Jahren dürfen sich nur registrieren, wenn ein
+              Erziehungsberechtigter zuvor seine Einwilligung erteilt hat. Der Verein bzw.
+              Trainer ist verantwortlich dafür, dass bei der Einladung Minderjähriger diese
+              Einwilligung vorliegt.
+            </p>
+            <p>
+              Wir verarbeiten keine Daten von Kindern unter 16 Jahren ohne nachgewiesene
+              elterliche Einwilligung. Sollten uns Hinweise vorliegen, dass Daten eines Kindes
+              unter 16 Jahren ohne Einwilligung verarbeitet wurden, werden diese unverzüglich
+              gelöscht.
+            </p>
+            <p>
+              Erziehungsberechtigte können die Löschung der Daten ihres Kindes jederzeit unter{" "}
+              <a
+                href="mailto:edwardschmuhl@web.de"
+                className="text-foreground underline underline-offset-2 hover:opacity-70 transition-opacity"
+              >
+                edwardschmuhl@web.de
+              </a>{" "}
+              anfordern.
+            </p>
           </div>
         </section>
 
@@ -418,6 +477,51 @@ export default function DatenschutzPage() {
                 </dd>
               </div>
             </dl>
+          </div>
+        </section>
+
+        {/* Verarbeitung von Vereinsmitgliederdaten */}
+        <section id="vereinsmitglieder" className="space-y-3 scroll-mt-6">
+          <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+            Verarbeitung von Vereinsmitgliederdaten
+          </h2>
+          <div className="text-sm leading-relaxed text-muted-foreground space-y-3">
+            <p>
+              Vereinsadmins und Trainer können Mitglieder per E-Mail zur Plattform einladen.
+              Dabei werden E-Mail-Adressen dieser Personen verarbeitet, auch wenn diese noch
+              kein eigenes Konto besitzen.
+            </p>
+            <dl className="space-y-2 mt-1">
+              <div>
+                <dt className="font-medium text-foreground">Verarbeitete Daten</dt>
+                <dd>E-Mail-Adresse, Name (sofern angegeben)</dd>
+              </div>
+              <div>
+                <dt className="font-medium text-foreground">Betroffene Personen</dt>
+                <dd>Eingeladene Vereinsmitglieder</dd>
+              </div>
+              <div>
+                <dt className="font-medium text-foreground">Zweck</dt>
+                <dd>Einladung zur Plattformnutzung</dd>
+              </div>
+              <div>
+                <dt className="font-medium text-foreground">Rechtsgrundlage</dt>
+                <dd>
+                  Berechtigte Interessen (Art.&nbsp;6 Abs.&nbsp;1 lit.&nbsp;f DSGVO) des
+                  Vereins an der digitalen Verwaltung; ggf. Einwilligung (Art.&nbsp;6
+                  Abs.&nbsp;1 lit.&nbsp;a DSGVO)
+                </dd>
+              </div>
+              <div>
+                <dt className="font-medium text-foreground">Löschung</dt>
+                <dd>Unverzüglich nach Widerruf oder nicht angenommener Einladung</dd>
+              </div>
+            </dl>
+            <p>
+              Kurs.Y agiert gegenüber den Vereinen als Auftragsverarbeiter gemäß
+              Art.&nbsp;28 DSGVO. Der jeweilige Verein ist datenschutzrechtlich Verantwortlicher
+              für die von ihm eingegebenen Mitgliederdaten.
+            </p>
           </div>
         </section>
 
