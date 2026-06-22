@@ -600,8 +600,6 @@ export function SessionEditModal({
   const [selectedColor, setSelectedColor] = useState<SessionColor | null>(initColor);
 
   // Sort order (display position in day view)
-  const [sortOrder, setSortOrder] = useState<number | null>(session?.sort_order ?? null);
-  const [showAdvanced, setShowAdvanced] = useState(false);
 
   // Expected groups
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
@@ -639,7 +637,7 @@ export function SessionEditModal({
       edit_scope: editScope,
       auto_extend: autoExtend,
       color: selectedColor,
-      sort_order: sortOrder,
+      sort_order: session?.sort_order ?? null,
       expected_group_ids: selectedGroupIds,
     };
 
@@ -913,62 +911,6 @@ export function SessionEditModal({
               </button>
             </div>
           )}
-
-          {/* Erweiterte Einstellungen */}
-          <div>
-            <button
-              type="button"
-              onClick={() => setShowAdvanced((v) => !v)}
-              className="w-full flex items-center justify-between text-xs font-semibold uppercase tracking-widest text-muted-foreground py-1 hover:text-foreground transition-colors"
-            >
-              Erweiterte Einstellungen
-              <svg
-                width="12" height="12" viewBox="0 0 12 12" fill="none"
-                className={`shrink-0 transition-transform ${showAdvanced ? "rotate-180" : ""}`}
-              >
-                <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </button>
-
-            {showAdvanced && (
-              <div className="mt-3 rounded-xl border border-border bg-muted/30 p-3 space-y-1.5">
-                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                  Anzeigereihenfolge im Tagesplan
-                </Label>
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  Wenn mehrere Trainings gleichzeitig stattfinden, bestimmt dieser Wert die Reihenfolge von links nach rechts. Du kannst die Reihenfolge auch per Drag &amp; Drop direkt im Tagesplan ändern.
-                </p>
-                <div className="flex items-center gap-3 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setSortOrder((v) => Math.max(0, (v ?? 0) - 1))}
-                    className="w-8 h-8 rounded-lg border border-input bg-background flex items-center justify-center hover:bg-secondary transition-colors font-mono text-lg leading-none select-none"
-                  >
-                    −
-                  </button>
-                  <span className="min-w-[3rem] text-center font-mono text-sm font-semibold">
-                    {sortOrder ?? "Auto"}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setSortOrder((v) => (v ?? -1) + 1)}
-                    className="w-8 h-8 rounded-lg border border-input bg-background flex items-center justify-center hover:bg-secondary transition-colors font-mono text-lg leading-none select-none"
-                  >
-                    +
-                  </button>
-                  {sortOrder !== null && (
-                    <button
-                      type="button"
-                      onClick={() => setSortOrder(null)}
-                      className="text-xs text-muted-foreground hover:text-foreground transition-colors underline underline-offset-2"
-                    >
-                      Zurücksetzen
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
 
           {/* Cancelled toggle — danger zone */}
           <div className={`rounded-xl border-2 border-dashed p-3 transition-colors ${isCancelled ? "border-destructive/60 bg-destructive/5" : "border-destructive/25 bg-destructive/[0.02]"}`}>

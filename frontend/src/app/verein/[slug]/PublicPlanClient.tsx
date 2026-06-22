@@ -3,6 +3,7 @@
 import { useState, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { formatTime } from "@/lib/utils/date";
+import { getDayLayout } from "@/lib/dayLayout";
 import type { SessionColor } from "@/types";
 import { SESSION_COLORS } from "@/types";
 
@@ -58,43 +59,14 @@ function timeToMin(t: string): number {
 function getOverlapLayout(
   sessions: PublicSession[]
 ): Map<string, { lane: number; totalLanes: number }> {
-  const result = new Map<string, { lane: number; totalLanes: number }>();
-  if (!sessions.length) return result;
-
-  const sorted = [...sessions].sort((a, b) => {
-    const sa = a.sortOrder ?? Infinity;
-    const sb = b.sortOrder ?? Infinity;
-    if (sa !== sb) return sa - sb;
-    return a.timeStart.localeCompare(b.timeStart) || a.timeEnd.localeCompare(b.timeEnd);
-  });
-
-  const cols: PublicSession[][] = [];
-  const sessionCol = new Map<string, number>();
-
-  for (const s of sorted) {
-    let placed = false;
-    for (let c = 0; c < cols.length; c++) {
-      const last = cols[c][cols[c].length - 1];
-      if (last.timeEnd <= s.timeStart) {
-        cols[c].push(s);
-        sessionCol.set(s.id, c);
-        placed = true;
-        break;
-      }
-    }
-    if (!placed) {
-      cols.push([s]);
-      sessionCol.set(s.id, cols.length - 1);
-    }
-  }
-
-  for (const s of sorted) {
-    const overlapping = sorted.filter(o => o.timeStart < s.timeEnd && o.timeEnd > s.timeStart);
-    const totalLanes = Math.max(...overlapping.map(o => (sessionCol.get(o.id) ?? 0))) + 1;
-    result.set(s.id, { lane: sessionCol.get(s.id) ?? 0, totalLanes });
-  }
-
-  return result;
+  return getDayLayout(
+    sessions.map((s) => ({
+      id: s.id,
+      timeStart: s.timeStart,
+      timeEnd: s.timeEnd,
+      sortOrder: s.sortOrder ?? null,
+    })),
+  );
 }
 
 // ── Sub-components ────────────────────────────────────────────

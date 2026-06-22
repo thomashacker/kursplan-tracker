@@ -8,6 +8,7 @@ import type { Club, TrainingWeek, TrainingSession, Location, Profile, ClubTopic,
 import { DAY_NAMES, SESSION_COLORS } from "@/types";
 import { formatTime, formatWeekRange, offsetWeek, getCurrentMonday, toISODate } from "@/lib/utils/date";
 import { createClient } from "@/lib/supabase/client";
+import { getDayLayout } from "@/lib/dayLayout";
 import { SessionCard, type AttendanceSummary } from "./SessionCard";
 import { SessionEditModal, type SessionSaveData } from "./SessionEditModal";
 import { AttendanceModal } from "./AttendanceModal";
@@ -70,45 +71,14 @@ function sessionLabel(s: TrainingSession): string {
 function getOverlapLayout(
   daySessions: TrainingSession[]
 ): Map<string, { lane: number; totalLanes: number }> {
-  const result = new Map<string, { lane: number; totalLanes: number }>();
-  if (daySessions.length === 0) return result;
-
-  // Greedy column packing — sort by explicit sort_order first so clubs can
-  // pin sessions to consistent columns, then fall back to time_start.
-  const sorted = [...daySessions].sort((a, b) => {
-    const sa = a.sort_order ?? Infinity;
-    const sb = b.sort_order ?? Infinity;
-    if (sa !== sb) return sa - sb;
-    return a.time_start.localeCompare(b.time_start) || a.time_end.localeCompare(b.time_end);
-  });
-  const cols: TrainingSession[][] = [];
-  const sessionCol = new Map<string, number>();
-
-  for (const s of sorted) {
-    let placed = false;
-    for (let c = 0; c < cols.length; c++) {
-      const last = cols[c][cols[c].length - 1];
-      if (last.time_end <= s.time_start) {
-        cols[c].push(s);
-        sessionCol.set(s.id, c);
-        placed = true;
-        break;
-      }
-    }
-    if (!placed) {
-      cols.push([s]);
-      sessionCol.set(s.id, cols.length - 1);
-    }
-  }
-
-  // totalLanes for each session = widest overlap clique it participates in
-  for (const s of sorted) {
-    const overlapping = sorted.filter(o => o.time_start < s.time_end && o.time_end > s.time_start);
-    const totalLanes = Math.max(...overlapping.map(o => (sessionCol.get(o.id) ?? 0))) + 1;
-    result.set(s.id, { lane: sessionCol.get(s.id) ?? 0, totalLanes });
-  }
-
-  return result;
+  return getDayLayout(
+    daySessions.map((s) => ({
+      id: s.id,
+      timeStart: s.time_start,
+      timeEnd: s.time_end,
+      sortOrder: s.sort_order,
+    })),
+  );
 }
 
 // ── Month view ────────────────────────────────────────────────
@@ -245,6 +215,112 @@ function MonthView({
 
 // ── Day timetable (drill-down) ────────────────────────────────
 
+/**
+ * Single absolute-positioned card on the day timetable. Click selects;
+ * arrow buttons appear on the left/right edges when selected so the user
+ * can move the card between lanes (swapping with whatever overlapping
+ * session occupies the target lane).
+ */
+function DayCard({
+  session,
+  info,
+  selectable,
+  selected,
+  onSelect,
+  onMoveLeft,
+  onMoveRight,
+  className,
+  style,
+  accentColor,
+  children,
+}: {
+  session: TrainingSession;
+  info: { lane: number; totalLanes: number };
+  selectable: boolean;
+  selected: boolean;
+  onSelect: () => void;
+  onMoveLeft: () => void;
+  onMoveRight: () => void;
+  className: string;
+  style: React.CSSProperties;
+  accentColor: string | null;
+  children: React.ReactNode;
+}) {
+  const reduced = useReducedMotion();
+  const canMoveLeft = selectable && info.lane > 0;
+  const canMoveRight = selectable && info.lane < info.totalLanes - 1;
+
+  return (
+    <motion.div
+      layout
+      layoutDependency={`${info.lane}:${info.totalLanes}`}
+      transition={
+        reduced
+          ? { duration: 0 }
+          : { layout: { type: "spring", stiffness: 420, damping: 34 } }
+      }
+      onClick={
+        selectable
+          ? (e) => {
+              e.stopPropagation();
+              onSelect();
+            }
+          : undefined
+      }
+      role={selectable ? "button" : undefined}
+      tabIndex={selectable ? 0 : undefined}
+      aria-pressed={selectable ? selected : undefined}
+      className={`${className} ${selectable ? "cursor-pointer" : ""} ${
+        selected ? "ring-2 ring-primary/80 shadow-lg z-20" : ""
+      }`}
+      style={style}
+    >
+      {info.totalLanes > 1 && !session.is_cancelled && (
+        <div
+          className="absolute left-0 top-0 bottom-0 w-1 rounded-l-lg pointer-events-none"
+          style={{
+            backgroundColor: accentColor ?? "var(--primary)",
+            opacity: 0.7,
+          }}
+        />
+      )}
+      {selected && canMoveLeft && (
+        <button
+          type="button"
+          aria-label="Eine Spalte nach links"
+          title="Eine Spalte nach links"
+          onClick={(e) => {
+            e.stopPropagation();
+            onMoveLeft();
+          }}
+          className="absolute left-1 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-primary text-primary-foreground shadow-lg flex items-center justify-center hover:opacity-90 active:scale-95 transition z-30"
+        >
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M10 3L5 8l5 5" />
+          </svg>
+        </button>
+      )}
+      {selected && canMoveRight && (
+        <button
+          type="button"
+          aria-label="Eine Spalte nach rechts"
+          title="Eine Spalte nach rechts"
+          onClick={(e) => {
+            e.stopPropagation();
+            onMoveRight();
+          }}
+          className="absolute right-1 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-primary text-primary-foreground shadow-lg flex items-center justify-center hover:opacity-90 active:scale-95 transition z-30"
+        >
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M6 3l5 5-5 5" />
+          </svg>
+        </button>
+      )}
+      {children}
+    </motion.div>
+  );
+}
+
 function DayTimetable({
   dayIndex,
   weekStart,
@@ -259,7 +335,7 @@ function DayTimetable({
   onNewSession,
   onBack,
   onAttendance,
-  onReorder,
+  onMoveToLane,
 }: {
   dayIndex: number;
   weekStart: string;
@@ -274,7 +350,7 @@ function DayTimetable({
   onNewSession: (day: number) => void;
   onBack: () => void;
   onAttendance: (s: TrainingSession) => void;
-  onReorder: (id1: string, id2: string) => void;
+  onMoveToLane: (sessionId: string, targetLane: number) => void;
 }) {
   const daySessions = sessions
     .filter((s) => s.day_of_week === dayIndex)
@@ -282,9 +358,6 @@ function DayTimetable({
 
   const layout = getOverlapLayout(daySessions);
 
-  // Drag-to-reorder state
-  const [dragId, setDragId] = useState<string | null>(null);
-  const [dragStartX, setDragStartX] = useState<number | null>(null);
   const sessionAreaRef = useRef<HTMLDivElement>(null);
 
   const allMins = daySessions.flatMap((s) => [timeToMin(s.time_start), timeToMin(s.time_end)]);
@@ -294,6 +367,25 @@ function DayTimetable({
 
   const hours: number[] = [];
   for (let h = rangeStart / 60; h <= rangeEnd / 60; h++) hours.push(h);
+
+  // Selection state — click a card to reveal the lane arrows.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // Drop selection if the day changes underneath us (e.g. back-button).
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSelectedId(null);
+  }, [dayIndex, weekStart]);
+
+  // Escape deselects.
+  useEffect(() => {
+    if (!selectedId) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setSelectedId(null);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedId]);
 
   return (
     <motion.div initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} transition={spring}>
@@ -328,7 +420,10 @@ function DayTimetable({
           <p className="text-xs text-muted-foreground">Für diesen Tag ist noch kein Training geplant.</p>
         </div>
       ) : (
-        <div className="rounded-xl border border-border overflow-hidden">
+        <div
+          className="rounded-xl border border-border overflow-hidden"
+          onClick={() => setSelectedId(null)}
+        >
           {/* Horizontal scroll wrapper — lets sessions breathe on narrow screens */}
           <div className="overflow-x-auto overflow-y-clip">
           {(() => {
@@ -384,19 +479,30 @@ function DayTimetable({
 
                 const isOverlapping = info.totalLanes > 1;
 
-                const isDragging = dragId === s.id;
-
                 return (
-                  <div
+                  <DayCard
                     key={s.id}
+                    session={s}
+                    info={info}
+                    selectable={isOverlapping && canEdit}
+                    selected={selectedId === s.id}
+                    onSelect={() => setSelectedId((cur) => (cur === s.id ? null : s.id))}
+                    onMoveLeft={() => {
+                      onMoveToLane(s.id, info.lane - 1);
+                      setSelectedId(null);
+                    }}
+                    onMoveRight={() => {
+                      onMoveToLane(s.id, info.lane + 1);
+                      setSelectedId(null);
+                    }}
+                    accentColor={hasColor ? colorCfg.border : null}
                     className={`absolute overflow-hidden group ${
                       isOverlapping ? "rounded-lg" : "rounded-xl"
                     } border transition-shadow ${
                       s.is_cancelled
                         ? "bg-destructive/8 border-destructive/30"
                         : hasColor ? "" : "bg-card border-primary/20"
-                    } ${isOverlapping && !hasColor && !s.is_cancelled ? "shadow-sm" : ""}
-                    ${isDragging ? "ring-2 ring-primary/50 shadow-lg z-20 opacity-90" : ""}`}
+                    } ${isOverlapping && !hasColor && !s.is_cancelled ? "shadow-sm" : ""}`}
                     style={{
                       top,
                       height,
@@ -405,57 +511,6 @@ function DayTimetable({
                       ...(hasColor ? { backgroundColor: colorCfg.bg, borderColor: colorCfg.border } : {}),
                     }}
                   >
-                    {/* Drag handle — only for overlapping sessions when editing is allowed */}
-                    {isOverlapping && canEdit && (
-                      <div
-                        className={`absolute top-0 inset-x-0 flex justify-center pt-1 pb-0.5 cursor-grab active:cursor-grabbing touch-none select-none z-10 transition-opacity ${
-                          isDragging ? "opacity-100" : "opacity-25 hover:opacity-60"
-                        }`}
-                        title="Reihenfolge verschieben"
-                        onPointerDown={(e) => {
-                          e.stopPropagation();
-                          (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-                          setDragId(s.id);
-                          setDragStartX(e.clientX);
-                        }}
-                        onPointerMove={(e) => {
-                          if (dragStartX === null || dragId !== s.id) return;
-                          const dx = e.clientX - dragStartX;
-                          const areaWidth = sessionAreaRef.current?.getBoundingClientRect().width ?? 400;
-                          const laneWidth = areaWidth / info.totalLanes;
-                          if (Math.abs(dx) > laneWidth * 0.35) {
-                            const dir = dx > 0 ? 1 : -1;
-                            const targetLane = info.lane + dir;
-                            const target = daySessions.find((o) => {
-                              if (o.id === s.id) return false;
-                              const oi = layout.get(o.id);
-                              return oi?.lane === targetLane &&
-                                o.time_start < s.time_end &&
-                                o.time_end > s.time_start;
-                            });
-                            if (target) {
-                              onReorder(s.id, target.id);
-                              setDragStartX(e.clientX);
-                            }
-                          }
-                        }}
-                        onPointerUp={() => { setDragId(null); setDragStartX(null); }}
-                        onPointerCancel={() => { setDragId(null); setDragStartX(null); }}
-                      >
-                        <svg width="14" height="8" viewBox="0 0 14 8" fill="currentColor" className={isDragging ? "text-primary" : "text-muted-foreground"}>
-                          <circle cx="2"  cy="2" r="1.3"/><circle cx="7"  cy="2" r="1.3"/><circle cx="12" cy="2" r="1.3"/>
-                          <circle cx="2"  cy="6" r="1.3"/><circle cx="7"  cy="6" r="1.3"/><circle cx="12" cy="6" r="1.3"/>
-                        </svg>
-                      </div>
-                    )}
-
-                    {/* Left accent stripe for overlapping sessions */}
-                    {isOverlapping && !s.is_cancelled && (
-                      <div
-                        className="absolute left-0 top-0 bottom-0 w-1 rounded-l-lg"
-                        style={{ backgroundColor: hasColor ? colorCfg.border : "var(--primary)", opacity: 0.7 }}
-                      />
-                    )}
                     <div className={`h-full px-3 py-2 ${isOverlapping ? "pl-3.5" : ""}`}>
                     {s.is_cancelled && (
                       <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-destructive mb-1">
@@ -553,7 +608,7 @@ function DayTimetable({
                     {/* Attendance button in timetable */}
                     <button
                       type="button"
-                      onClick={() => onAttendance(s)}
+                      onClick={(e) => { e.stopPropagation(); onAttendance(s); }}
                       className="absolute bottom-1.5 left-1.5 right-1.5 md:hidden md:group-hover:flex hidden items-center justify-center gap-1 text-[9px] font-medium text-muted-foreground/70 hover:text-foreground border border-dashed border-border/50 rounded py-0.5 hover:bg-secondary/30 transition-colors"
                     >
                       <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -564,7 +619,7 @@ function DayTimetable({
                     </button>
                     {canEdit && (
                       <div className="absolute top-1.5 right-1.5 flex md:hidden md:group-hover:flex gap-0.5 bg-background/90 rounded-lg p-0.5 shadow-sm">
-                        <button type="button" onClick={() => onEdit(s)}
+                        <button type="button" onClick={(e) => { e.stopPropagation(); onEdit(s); }}
                           className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
                           title="Bearbeiten">
                           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -572,7 +627,7 @@ function DayTimetable({
                             <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
                           </svg>
                         </button>
-                        <button type="button" onClick={() => onDelete(s)}
+                        <button type="button" onClick={(e) => { e.stopPropagation(); onDelete(s); }}
                           className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
                           title="Löschen">
                           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -585,7 +640,7 @@ function DayTimetable({
                       </div>
                     )}
                     </div>{/* end inner content div */}
-                  </div>
+                  </DayCard>
                 );
               })}
             </div>
@@ -1303,36 +1358,46 @@ export function WeeklyPlanEditor({
     startTransition(() => router.refresh());
   }
 
-  async function handleReorderSessions(id1: string, id2: string) {
+  async function handleMoveToLane(sourceId: string, targetLane: number) {
     const allSessions = week?.training_sessions ?? [];
-    const s1 = allSessions.find((s) => s.id === id1);
-    const s2 = allSessions.find((s) => s.id === id2);
-    if (!s1 || !s2) return;
+    const source = allSessions.find((s) => s.id === sourceId);
+    if (!source) return;
 
-    // Compute current lane positions so we can use them as initial sort_order
-    const daySessions = allSessions.filter((s) => s.day_of_week === s1.day_of_week);
+    const daySessions = allSessions.filter((s) => s.day_of_week === source.day_of_week);
     const layout = getOverlapLayout(daySessions);
-    const lane1 = layout.get(id1)?.lane ?? 0;
-    const lane2 = layout.get(id2)?.lane ?? 0;
+    const sourceLane = layout.get(sourceId)?.lane ?? 0;
+    if (targetLane === sourceLane) return;
 
-    // Use existing sort_order if set, otherwise initialise from current lane
-    const newO1 = s2.sort_order ?? lane2; // s1 takes s2's position
-    const newO2 = s1.sort_order ?? lane1; // s2 takes s1's position
+    // First session at the target lane that overlaps source in time becomes
+    // the swap partner. Any further occupants stay put and will visually
+    // stack with source at the target lane — overlaps are allowed.
+    const partner = daySessions.find(
+      (s) =>
+        s.id !== sourceId &&
+        layout.get(s.id)?.lane === targetLane &&
+        s.time_start < source.time_end &&
+        s.time_end > source.time_start,
+    );
 
-    // Optimistic local update so the layout re-renders immediately
     setWeek((w) => w ? {
       ...w,
-      training_sessions: (w.training_sessions ?? []).map((s) =>
-        s.id === id1 ? { ...s, sort_order: newO1 } :
-        s.id === id2 ? { ...s, sort_order: newO2 } : s
-      ),
+      training_sessions: (w.training_sessions ?? []).map((s) => {
+        if (s.id === sourceId) return { ...s, sort_order: targetLane };
+        if (partner && s.id === partner.id) return { ...s, sort_order: sourceLane };
+        return s;
+      }),
     } : w);
 
     const supabase = createClient();
-    await Promise.all([
-      supabase.from("training_sessions").update({ sort_order: newO1 }).eq("id", id1),
-      supabase.from("training_sessions").update({ sort_order: newO2 }).eq("id", id2),
-    ]);
+    const updates = [
+      supabase.from("training_sessions").update({ sort_order: targetLane }).eq("id", sourceId),
+    ];
+    if (partner) {
+      updates.push(
+        supabase.from("training_sessions").update({ sort_order: sourceLane }).eq("id", partner.id),
+      );
+    }
+    await Promise.all(updates);
   }
 
   function requestDelete(session: TrainingSession) {
@@ -1662,7 +1727,7 @@ export function WeeklyPlanEditor({
               onNewSession={openNewSession}
               onBack={() => setSelectedDay(null)}
               onAttendance={(s) => setAttendanceSession(s)}
-              onReorder={handleReorderSessions}
+              onMoveToLane={handleMoveToLane}
             />
           ) : (
             <>
