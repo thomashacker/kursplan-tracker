@@ -57,3 +57,5 @@ supabase/.temp/
 
 # MCP (local dev only)
 .mcp.json
+
+todo.md
