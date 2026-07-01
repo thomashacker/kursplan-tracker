@@ -1,13 +1,15 @@
 import { createClient } from "@/lib/supabase/server";
 import { notFound } from "next/navigation";
+import Link from "next/link";
 import { Suspense } from "react";
+import { ArrowRight } from "lucide-react";
 import type { Club, ClubMembership } from "@/types";
 import { formatDate, getSessionDate, toISODate } from "@/lib/utils/date";
 import TimeWindowPicker, { type TimeWindow } from "./TimeWindowPicker";
 import { GroupAttendanceAccordion } from "./GroupAttendanceAccordion";
 import { ActivityChart, type DailyPoint, type WeekdayPoint } from "./ActivityChart";
 import { CollapsibleSection } from "./CollapsibleSection";
-import { windowRange, mondayOnOrBefore } from "./dateRange";
+import { windowRange, mondayOnOrBefore, windowLongLabel } from "./dateRange";
 
 // ── helpers ───────────────────────────────────────────────────
 
@@ -23,12 +25,13 @@ function fmtHours(minutes: number): string {
   return m === 0 ? `${h}h` : `${h}h ${m}m`;
 }
 
-const WINDOW_LABELS: Record<TimeWindow, string> = {
-  current_month: "dieser Monat",
-  last_month:    "letzter Monat",
-  "6m":          "letzte 6 Monate",
-  "1y":          "letztes Jahr",
-};
+const WINDOW_KEYS = new Set<TimeWindow>([
+  "current_month",
+  "last_month",
+  "6m",
+  "1y",
+  "custom",
+]);
 
 // ── page ──────────────────────────────────────────────────────
 
@@ -37,13 +40,17 @@ export default async function StatistikenPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ window?: string }>;
+  searchParams: Promise<{ window?: string; from?: string; to?: string }>;
 }) {
   const { slug } = await params;
-  const { window: windowParam } = await searchParams;
+  const {
+    window: windowParam,
+    from: fromParam,
+    to: toParam,
+  } = await searchParams;
 
   const activeWindow: TimeWindow =
-    windowParam && windowParam in WINDOW_LABELS
+    windowParam && WINDOW_KEYS.has(windowParam as TimeWindow)
       ? (windowParam as TimeWindow)
       : "current_month";
 
@@ -69,7 +76,7 @@ export default async function StatistikenPage({
 
   if (!membership || membership.role === "member") notFound();
 
-  const { from, to } = windowRange(activeWindow);
+  const { from, to } = windowRange(activeWindow, new Date(), fromParam, toParam);
   const fromMondayISO = mondayOnOrBefore(from);
   const toMondayISO   = mondayOnOrBefore(to);
   // `to` is set when the window is computed (start of request); sessions
@@ -491,13 +498,40 @@ export default async function StatistikenPage({
             Statistiken
           </h1>
           <p className="text-sm text-muted-foreground">
-            {club.name} — {WINDOW_LABELS[activeWindow]}
+            {club.name} — {windowLongLabel(activeWindow)}
           </p>
         </div>
         <Suspense>
-          <TimeWindowPicker current={activeWindow} />
+          <TimeWindowPicker
+            current={activeWindow}
+            from={activeWindow === "custom" ? fromParam : undefined}
+            to={activeWindow === "custom" ? toParam : undefined}
+          />
         </Suspense>
       </div>
+
+      {/* ── Quick link to per-member deep-dive ─────────────────── */}
+      <Link
+        href={{
+          pathname: `/dashboard/verein/${slug}/statistiken/teilnehmer`,
+          query: {
+            window: activeWindow,
+            ...(activeWindow === "custom" && fromParam ? { from: fromParam } : {}),
+            ...(activeWindow === "custom" && toParam ? { to: toParam } : {}),
+          },
+        }}
+        className="group flex items-center gap-3 rounded-2xl border border-border bg-card px-4 py-3 hover:bg-muted/40 transition-colors"
+      >
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold leading-tight">
+            Teilnehmer-Detailansicht
+          </p>
+          <p className="text-xs text-muted-foreground leading-tight mt-0.5">
+            Verlauf vergleichen, Gruppen gegenüberstellen
+          </p>
+        </div>
+        <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground group-hover:translate-x-0.5 transition-all shrink-0" />
+      </Link>
 
       {/* ── KPI grid (7 cards) ──────────────────────────────── */}
       <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
