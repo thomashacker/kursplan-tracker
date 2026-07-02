@@ -66,6 +66,7 @@ export default async function PublicPlanPage({
   const dashboardHref = userMembership ? `/dashboard/verein/${slug}` : null;
 
   const showTrainers = (club.settings?.show_trainers_public as boolean | undefined) ?? true;
+  const showGroups = (club.settings?.show_groups_public as boolean | undefined) ?? false;
 
   const monday = getCurrentMonday();
   const until  = offsetWeek(monday, 9);
@@ -123,6 +124,42 @@ export default async function PublicPlanPage({
     supabase.from("club_topics").select("name, color").eq("club_id", club.id),
     supabase.from("club_session_types").select("name, color").eq("club_id", club.id),
   ]);
+
+  // ── Expected groups per session (public toggle) ────────────
+  const groupsBySession = new Map<
+    string,
+    { id: string; name: string; color: string | null }[]
+  >();
+  if (showGroups) {
+    const allSessionIds = allSessions.map((s) => s.id);
+    if (allSessionIds.length) {
+      const { data: expectedRows } = await supabase
+        .from("session_expected_groups")
+        .select("session_id, teilnehmer_groups(id, name, color)")
+        .in("session_id", allSessionIds);
+      // Supabase types the joined row as an array even for many-to-one FKs;
+      // in practice the payload is either a single object or a one-element
+      // array. Handle both shapes.
+      type JoinedGroup = { id: string; name: string; color: string | null };
+      type Row = {
+        session_id: string;
+        teilnehmer_groups: JoinedGroup | JoinedGroup[] | null;
+      };
+      for (const row of (expectedRows ?? []) as unknown as Row[]) {
+        const tg = row.teilnehmer_groups;
+        const g = Array.isArray(tg) ? tg[0] : tg;
+        if (!g) continue;
+        if (!groupsBySession.has(row.session_id))
+          groupsBySession.set(row.session_id, []);
+        groupsBySession
+          .get(row.session_id)!
+          .push({ id: g.id, name: g.name, color: g.color });
+      }
+      // Stable order per session
+      for (const arr of groupsBySession.values())
+        arr.sort((a, b) => a.name.localeCompare(b.name));
+    }
+  }
   const topicColors: ColorMap = Object.fromEntries(
     (clubTopics ?? []).map((t: { name: string; color: string | null }) => [t.name, t.color ?? null])
   );
@@ -176,6 +213,12 @@ export default async function PublicPlanPage({
         trainers,
         color: session.color ?? null,
         sortOrder: session.sort_order ?? null,
+        groups: showGroups
+          ? (groupsBySession.get(session.id) ?? []).map((g) => ({
+              name: g.name,
+              color: g.color,
+            }))
+          : [],
       });
     }
   }

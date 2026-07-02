@@ -30,6 +30,8 @@ export type PublicSession = {
   trainers: TrainerInfo[];
   color: string | null;
   sortOrder?: number | null;
+  /** Expected teilnehmer groups — only populated when the public toggle is on. */
+  groups?: { name: string; color: string | null }[];
 };
 
 export type FilterOptions = {
@@ -198,6 +200,33 @@ function SessionRow({
                   ))}
                 </span>
               )}
+            </div>
+          )}
+          {s.groups && s.groups.length > 0 && (
+            <div className={`flex flex-wrap items-center gap-x-1.5 gap-y-1 mt-1 text-xs ${cancelled ? "opacity-50" : ""}`}>
+              <svg
+                width="11" height="11" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                className="text-muted-foreground/70 shrink-0"
+              >
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+              </svg>
+              {s.groups.map((g) => (
+                <span
+                  key={g.name}
+                  className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full border ${cancelled ? "line-through" : ""}`}
+                  style={{
+                    backgroundColor: g.color ? `${g.color}18` : undefined,
+                    borderColor: g.color ? `${g.color}55` : undefined,
+                    color: g.color ?? undefined,
+                  }}
+                >
+                  {g.name}
+                </span>
+              ))}
             </div>
           )}
           {s.description && (
@@ -415,6 +444,23 @@ function DayView({
                               <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
                             </svg>
                             <span className="text-[9px] text-muted-foreground truncate">{s.location.name}</span>
+                          </div>
+                        )}
+                        {height >= 100 && s.groups && s.groups.length > 0 && (
+                          <div className="flex flex-wrap gap-0.5 mt-0.5">
+                            {s.groups.slice(0, 3).map((g) => (
+                              <span
+                                key={g.name}
+                                className="text-[9px] font-medium px-1.5 py-0.5 rounded-full leading-none border"
+                                style={{
+                                  backgroundColor: g.color ? `${g.color}18` : undefined,
+                                  borderColor: g.color ? `${g.color}55` : "transparent",
+                                  color: g.color ?? undefined,
+                                }}
+                              >
+                                {g.name}
+                              </span>
+                            ))}
                           </div>
                         )}
                         {height >= 140 && s.description && (

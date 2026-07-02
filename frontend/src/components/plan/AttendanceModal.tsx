@@ -72,6 +72,7 @@ export function AttendanceModal({ session, clubId, canEdit, onClose }: Props) {
   const [scannerOpen, setScannerOpen] = useState(false);
   const [scanResult, setScanResult] = useState<{ name: string; alreadyPresent: boolean } | null>(null);
   const [weitereOpen, setWeitereOpen] = useState(false);
+  const [search, setSearch] = useState("");
 
   // Data
   const [teilnehmer, setTeilnehmer] = useState<Teilnehmer[]>([]);
@@ -318,6 +319,43 @@ export function AttendanceModal({ session, clubId, canEdit, onClose }: Props) {
               </div>
             )}
 
+            {/* ── Search bar ────────────────────────────────── */}
+            {teilnehmer.length > 0 && (
+              <div className="px-5 py-2.5 border-b border-border bg-background shrink-0">
+                <div className="relative">
+                  <svg
+                    width="13" height="13" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                    className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  >
+                    <circle cx="11" cy="11" r="8" />
+                    <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                  </svg>
+                  <input
+                    type="text"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Teilnehmer suchen…"
+                    className="w-full h-9 text-sm rounded-lg border border-border bg-secondary/30 pl-8 pr-8 placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:bg-background"
+                    autoComplete="off"
+                  />
+                  {search && (
+                    <button
+                      type="button"
+                      onClick={() => setSearch("")}
+                      aria-label="Suche leeren"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18" />
+                        <line x1="6" y1="6" x2="18" y2="18" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* ── Teilnehmer list ─────────────────────────────── */}
             <div className="flex-1 overflow-y-auto min-h-0">
               {teilnehmer.length === 0 ? (
@@ -328,22 +366,52 @@ export function AttendanceModal({ session, clubId, canEdit, onClose }: Props) {
                   </p>
                 </div>
               ) : (
-                <div className="divide-y divide-border">
-                  {hasExpectedGroups ? (
-                    (() => {
-                      const expectedIds = new Set(expectedTeilnehmer.map((t) => t.id));
-                      const remaining = teilnehmer.filter((t) => !expectedIds.has(t.id));
-                      return (
+                (() => {
+                  const q = search.trim().toLowerCase();
+                  const matches = (t: Teilnehmer) =>
+                    !q || t.name.toLowerCase().includes(q);
+                  const searching = q.length > 0;
+
+                  const filteredExpected = expectedTeilnehmer.filter(matches);
+                  const expectedIds = new Set(expectedTeilnehmer.map((t) => t.id));
+                  const remaining = teilnehmer.filter((t) => !expectedIds.has(t.id));
+                  const filteredRemaining = remaining.filter(matches);
+                  const filteredFlat = teilnehmer.filter(matches);
+
+                  const nothing =
+                    hasExpectedGroups
+                      ? filteredExpected.length === 0 && filteredRemaining.length === 0
+                      : filteredFlat.length === 0;
+
+                  if (searching && nothing) {
+                    return (
+                      <div className="flex flex-col items-center justify-center py-12 text-center px-6">
+                        <p className="text-sm text-muted-foreground">
+                          Keine Treffer für &quot;{search}&quot;.
+                        </p>
+                      </div>
+                    );
+                  }
+
+                  // Auto-expand "Weitere" when searching so hits in there aren't hidden.
+                  const showRemaining = searching || weitereOpen;
+
+                  return (
+                    <div className="divide-y divide-border">
+                      {hasExpectedGroups ? (
                         <>
-                          {/* Expected group members */}
-                          {expectedTeilnehmer.length > 0 && (
+                          {filteredExpected.length > 0 && (
                             <>
                               <div className="px-5 py-2 bg-secondary/30">
                                 <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-                                  Erwartet ({expectedTeilnehmer.length})
+                                  Erwartet ({filteredExpected.length}
+                                  {searching && filteredExpected.length !== expectedTeilnehmer.length
+                                    ? ` / ${expectedTeilnehmer.length}`
+                                    : ""}
+                                  )
                                 </p>
                               </div>
-                              {expectedTeilnehmer.map((t) => (
+                              {filteredExpected.map((t) => (
                                 <TeilnehmerRow
                                   key={t.id}
                                   teilnehmer={t}
@@ -356,54 +424,61 @@ export function AttendanceModal({ session, clubId, canEdit, onClose }: Props) {
                             </>
                           )}
 
-                          {/* Weitere — collapsed by default */}
-                          {remaining.length > 0 && (
+                          {filteredRemaining.length > 0 && (
                             <>
-                              <button
-                                type="button"
-                                onClick={() => setWeitereOpen((o) => !o)}
-                                className="w-full flex items-center justify-between px-5 py-2.5 bg-secondary/20 hover:bg-secondary/40 transition-colors"
-                              >
-                                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-                                  Weitere ({remaining.length})
-                                </p>
-                                <svg
-                                  width="12" height="12" viewBox="0 0 24 24" fill="none"
-                                  stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-                                  className={`text-muted-foreground transition-transform duration-200 ${weitereOpen ? "rotate-180" : ""}`}
+                              {searching ? (
+                                <div className="px-5 py-2 bg-secondary/20">
+                                  <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                                    Weitere ({filteredRemaining.length} / {remaining.length})
+                                  </p>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setWeitereOpen((o) => !o)}
+                                  className="w-full flex items-center justify-between px-5 py-2.5 bg-secondary/20 hover:bg-secondary/40 transition-colors"
                                 >
-                                  <polyline points="6 9 12 15 18 9" />
-                                </svg>
-                              </button>
-                              {weitereOpen && remaining.map((t) => (
-                                <TeilnehmerRow
-                                  key={t.id}
-                                  teilnehmer={t}
-                                  status={attendance.get(t.id)}
-                                  groups={getGroupsForTeilnehmer(t.id)}
-                                  canEdit={canEdit}
-                                  onToggle={() => toggleStatus(t.id, attendance.get(t.id))}
-                                />
-                              ))}
+                                  <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                                    Weitere ({remaining.length})
+                                  </p>
+                                  <svg
+                                    width="12" height="12" viewBox="0 0 24 24" fill="none"
+                                    stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                                    className={`text-muted-foreground transition-transform duration-200 ${weitereOpen ? "rotate-180" : ""}`}
+                                  >
+                                    <polyline points="6 9 12 15 18 9" />
+                                  </svg>
+                                </button>
+                              )}
+                              {showRemaining &&
+                                filteredRemaining.map((t) => (
+                                  <TeilnehmerRow
+                                    key={t.id}
+                                    teilnehmer={t}
+                                    status={attendance.get(t.id)}
+                                    groups={getGroupsForTeilnehmer(t.id)}
+                                    canEdit={canEdit}
+                                    onToggle={() => toggleStatus(t.id, attendance.get(t.id))}
+                                  />
+                                ))}
                             </>
                           )}
                         </>
-                      );
-                    })()
-                  ) : (
-                    /* No groups set — show everyone flat */
-                    teilnehmer.map((t) => (
-                      <TeilnehmerRow
-                        key={t.id}
-                        teilnehmer={t}
-                        status={attendance.get(t.id)}
-                        groups={getGroupsForTeilnehmer(t.id)}
-                        canEdit={canEdit}
-                        onToggle={() => toggleStatus(t.id, attendance.get(t.id))}
-                      />
-                    ))
-                  )}
-                </div>
+                      ) : (
+                        filteredFlat.map((t) => (
+                          <TeilnehmerRow
+                            key={t.id}
+                            teilnehmer={t}
+                            status={attendance.get(t.id)}
+                            groups={getGroupsForTeilnehmer(t.id)}
+                            canEdit={canEdit}
+                            onToggle={() => toggleStatus(t.id, attendance.get(t.id))}
+                          />
+                        ))
+                      )}
+                    </div>
+                  );
+                })()
               )}
             </div>
           </>
