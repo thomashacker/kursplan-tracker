@@ -7,6 +7,7 @@ import {
   formatWeekRange,
   toISODate,
   getCurrentMonday,
+  getCurrentDayOfWeek,
 } from "../date";
 
 describe("formatDate", () => {
@@ -87,5 +88,20 @@ describe("getCurrentMonday", () => {
   it("returns a valid ISO date string", () => {
     const iso = getCurrentMonday();
     expect(iso).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+});
+
+describe("getCurrentDayOfWeek", () => {
+  it("returns 0..6", () => {
+    const dow = getCurrentDayOfWeek();
+    expect(dow).toBeGreaterThanOrEqual(0);
+    expect(dow).toBeLessThanOrEqual(6);
+  });
+  it("agrees with getCurrentMonday for today (dow days after the Monday equals today)", () => {
+    const monday = getCurrentMonday();
+    const dow = getCurrentDayOfWeek();
+    const derived = getSessionDate(monday, dow);
+    // toDateString is TZ-local and covers year+month+day equality.
+    expect(derived.toDateString()).toBe(new Date().toDateString());
   });
 });

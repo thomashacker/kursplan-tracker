@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import dynamic from "next/dynamic";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
@@ -60,11 +60,20 @@ interface Props {
   clubId: string;
   canEdit: boolean;
   onClose: () => void;
+  /**
+   * Called right before this modal writes a column on `training_sessions`
+   * (e.g. the Probetraining counter). The parent is expected to:
+   *   1. suppress its realtime "changed by another user" toast for this echo, and
+   *   2. optimistically apply the same patch to its local `week` state so
+   *      session cards / re-open of the modal see the fresh value without a
+   *      full refresh.
+   */
+  onLocalSessionPatch?: (patch: Partial<TrainingSession>) => void;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function AttendanceModal({ session, clubId, canEdit, onClose }: Props) {
+export function AttendanceModal({ session, clubId, canEdit, onClose, onLocalSessionPatch }: Props) {
   const supabase = createClient();
 
   const [loading, setLoading] = useState(true);
@@ -73,6 +82,10 @@ export function AttendanceModal({ session, clubId, canEdit, onClose }: Props) {
   const [scanResult, setScanResult] = useState<{ name: string; alreadyPresent: boolean } | null>(null);
   const [weitereOpen, setWeitereOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const [probetraining, setProbetraining] = useState<number>(
+    session.probetraining_count ?? 0,
+  );
+  const savedProbetrainingRef = useRef<number>(probetraining);
 
   // Data
   const [teilnehmer, setTeilnehmer] = useState<Teilnehmer[]>([]);
@@ -163,6 +176,40 @@ export function AttendanceModal({ session, clubId, canEdit, onClose }: Props) {
       }, { onConflict: "session_id,teilnehmer_id" });
     }
   }
+
+  // ── Probetraining counter ──────────────────────────────────────────────────
+  function adjustProbetraining(delta: number) {
+    if (!canEdit) return;
+    setProbetraining((cur) => Math.max(0, cur + delta));
+  }
+
+  // Persist debounced so rapid +/+/+ collapses into one write.
+  useEffect(() => {
+    if (probetraining === savedProbetrainingRef.current) return;
+    const id = setTimeout(async () => {
+      const target = probetraining;
+      // Re-check inside the timeout — the parent may have re-rendered and
+      // reset our callback identity between scheduling and firing. Without
+      // this we could issue a duplicate write for the same value.
+      if (target === savedProbetrainingRef.current) return;
+      // Mark saved optimistically so subsequent effect runs converge fast.
+      const prev = savedProbetrainingRef.current;
+      savedProbetrainingRef.current = target;
+      // Patch the parent's local session state so the badge on the plan card
+      // updates immediately AND the parent's realtime subscription can
+      // suppress the echo of this write.
+      onLocalSessionPatch?.({ probetraining_count: target });
+      const { error } = await supabase
+        .from("training_sessions")
+        .update({ probetraining_count: target })
+        .eq("id", session.id);
+      if (error) {
+        savedProbetrainingRef.current = prev;
+        toast.error("Probetraining konnte nicht gespeichert werden");
+      }
+    }, 400);
+    return () => clearTimeout(id);
+  }, [probetraining, session.id, supabase, onLocalSessionPatch]);
 
   // ── Mark all present ────────────────────────────────────────────────────────
   async function markAllPresent() {
@@ -276,6 +323,54 @@ export function AttendanceModal({ session, clubId, canEdit, onClose }: Props) {
                     {g.name}
                   </span>
                 ))}
+              </div>
+            )}
+
+            {/* ── Probetraining counter ──────────────────────── */}
+            {(canEdit || probetraining > 0) && (
+              <div className="flex items-center justify-between gap-3 px-5 py-2.5 border-b border-border shrink-0">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center text-primary shrink-0">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="9" cy="7" r="4" />
+                      <path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2" />
+                      <line x1="19" y1="8" x2="19" y2="14" />
+                      <line x1="16" y1="11" x2="22" y2="11" />
+                    </svg>
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold leading-none">Probetraining</p>
+                    <p className="text-[10px] text-muted-foreground leading-none mt-1 truncate">
+                      Externe Teilnehmer
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    type="button"
+                    aria-label="Probetraining verringern"
+                    onClick={() => adjustProbetraining(-1)}
+                    disabled={!canEdit || probetraining === 0}
+                    className="w-8 h-8 rounded-lg border border-border flex items-center justify-center text-lg font-semibold hover:bg-secondary disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                  >
+                    −
+                  </button>
+                  <span
+                    className="w-9 text-center text-lg font-bold tabular-nums leading-none"
+                    style={{ fontFamily: "var(--font-syne, system-ui)" }}
+                  >
+                    {probetraining}
+                  </span>
+                  <button
+                    type="button"
+                    aria-label="Probetraining erhöhen"
+                    onClick={() => adjustProbetraining(1)}
+                    disabled={!canEdit}
+                    className="w-8 h-8 rounded-lg border border-border flex items-center justify-center text-lg font-semibold hover:bg-secondary disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                  >
+                    +
+                  </button>
+                </div>
               </div>
             )}
 

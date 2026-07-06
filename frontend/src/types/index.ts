@@ -60,6 +60,8 @@ export interface TrainingWeek {
   week_start: string; // ISO date string (YYYY-MM-DD)
   is_published: boolean;
   notes: string | null;
+  // Days of the week the notes banner is visible (0=Mo … 6=So).
+  notes_visible_dow: number[];
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -118,6 +120,7 @@ export interface TrainingSession {
   notes: string | null;
   color: string | null;
   sort_order: number | null;
+  probetraining_count: number; // trial visitors — anonymous counter
   created_at: string;
   updated_at: string;
   // attendance

@@ -815,6 +815,9 @@ export function WeeklyPlanEditor({
   const [attendanceSummaries, setAttendanceSummaries] = useState<Map<string, AttendanceSummary>>(new Map());
   const [attendanceSummaryRevision, setAttendanceSummaryRevision] = useState(0);
   const [noteText, setNoteText] = useState(initialWeek?.notes ?? "");
+  const [noteVisibleDow, setNoteVisibleDow] = useState<number[]>(
+    initialWeek?.notes_visible_dow ?? [0, 1, 2, 3, 4, 5, 6],
+  );
   const [noteSaving, setNoteSaving] = useState(false);
   const [noteSaved, setNoteSaved] = useState(false);
 
@@ -891,6 +894,7 @@ export function WeeklyPlanEditor({
     /* eslint-disable react-hooks/set-state-in-effect */
     setWeek(initialWeek);
     setNoteText(initialWeek?.notes ?? "");
+    setNoteVisibleDow(initialWeek?.notes_visible_dow ?? [0, 1, 2, 3, 4, 5, 6]);
     setHasChanges(false);
     setHasRemoteChanges(false);
     /* eslint-enable react-hooks/set-state-in-effect */
@@ -960,15 +964,23 @@ export function WeeklyPlanEditor({
     return data.id;
   }
 
-  async function saveNote(value: string) {
+  async function saveNote(value: string, visibleDow: number[]) {
     if (!canEdit) return;
+    // Enforce the DB CHECK client-side: at least one day, else fall back to all.
+    const dow = visibleDow.length > 0
+      ? [...visibleDow].sort((a, b) => a - b)
+      : [0, 1, 2, 3, 4, 5, 6];
     suppressRealtimeRef.current = true;
     setNoteSaving(true);
     const supabase = createClient();
     const weekId = await ensureWeekExists().catch(() => null);
     if (!weekId) { setNoteSaving(false); return; }
-    await supabase.from("training_weeks").update({ notes: value.trim() || null }).eq("id", weekId);
-    setWeek((w) => w ? { ...w, notes: value.trim() || null } : w);
+    const trimmed = value.trim() || null;
+    await supabase
+      .from("training_weeks")
+      .update({ notes: trimmed, notes_visible_dow: dow })
+      .eq("id", weekId);
+    setWeek((w) => w ? { ...w, notes: trimmed, notes_visible_dow: dow } : w);
     setNoteSaving(false);
     setNoteSaved(true);
     setTimeout(() => setNoteSaved(false), 2000);
@@ -1195,6 +1207,7 @@ export function WeeklyPlanEditor({
             locations: locations.find((l) => l.id === data.location_id),
             trainer_id: trainer_ids[0] ?? null, is_cancelled: data.is_cancelled,
             color: data.color, sort_order: data.sort_order, template_id: null, is_modified: false,
+            probetraining_count: 0,
             session_trainers: [
               ...trainer_ids.map((uid) => ({ session_id: created.id, user_id: uid, virtual_trainer_id: null })),
               ...virtual_trainer_ids.map((vid) => ({ session_id: created.id, user_id: null, virtual_trainer_id: vid })),
@@ -1355,6 +1368,9 @@ export function WeeklyPlanEditor({
 
     setEditingSession(null);
     setHasChanges(true);
+    // Force the attendance-summary effect to re-run so newly-added / removed
+    // expected groups show up on the session cards without a page refresh.
+    setAttendanceSummaryRevision((r) => r + 1);
     startTransition(() => router.refresh());
   }
 
@@ -1367,6 +1383,9 @@ export function WeeklyPlanEditor({
     const layout = getOverlapLayout(daySessions);
     const sourceLane = layout.get(sourceId)?.lane ?? 0;
     if (targetLane === sourceLane) return;
+
+    // Own write — the realtime echo shouldn't surface as "changed by another user".
+    suppressRealtimeRef.current = true;
 
     // First session at the target lane that overlaps source in time becomes
     // the swap partner. Any further occupants stay put and will visually
@@ -1682,15 +1701,83 @@ export function WeeklyPlanEditor({
               <textarea
                 value={noteText}
                 onChange={(e) => setNoteText(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) saveNote(noteText); }}
+                onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) saveNote(noteText, noteVisibleDow); }}
                 placeholder="Hinweis für diese Woche — z. B. Turnier, Saalwechsel, Sondertraining, Änderungen im Ablauf…"
                 rows={6}
                 className="w-full bg-transparent text-sm resize-none focus:outline-none placeholder:text-amber-900/30 dark:placeholder:text-amber-100/20 text-amber-950 dark:text-amber-100 leading-relaxed"
               />
+
+              {/* Day-of-week visibility */}
+              <div className="space-y-2 pt-3 border-t border-amber-500/15">
+                <div className="flex items-baseline gap-2 flex-wrap">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-amber-700/75 dark:text-amber-400/60">
+                    Sichtbar an
+                  </span>
+                  <span className="text-[10px] text-amber-800/50 dark:text-amber-300/40">
+                    {noteVisibleDow.length === 7
+                      ? "allen Tagen"
+                      : noteVisibleDow.length === 0
+                        ? "keinem Tag"
+                        : `${noteVisibleDow.length} von 7 Tagen`}
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-1.5 items-center">
+                  {DAY_NAMES.map((name, idx) => {
+                    const on = noteVisibleDow.includes(idx);
+                    return (
+                      <button
+                        type="button"
+                        key={idx}
+                        onClick={() =>
+                          setNoteVisibleDow((cur) =>
+                            cur.includes(idx)
+                              ? cur.filter((d) => d !== idx)
+                              : [...cur, idx].sort((a, b) => a - b),
+                          )
+                        }
+                        aria-pressed={on}
+                        title={name}
+                        className={`w-9 h-7 rounded-md text-[11px] font-semibold border transition-colors ${
+                          on
+                            ? "bg-amber-500 text-white border-amber-500"
+                            : "bg-transparent text-amber-800/60 dark:text-amber-300/50 border-amber-500/25 hover:border-amber-500/50 hover:text-amber-800 dark:hover:text-amber-300"
+                        }`}
+                      >
+                        {name.slice(0, 2)}
+                      </button>
+                    );
+                  })}
+                  <span className="w-px h-5 bg-amber-500/20 mx-1" />
+                  <button
+                    type="button"
+                    onClick={() => setNoteVisibleDow([0, 1, 2, 3, 4, 5, 6])}
+                    className="px-2.5 h-7 rounded-md text-[11px] font-medium text-amber-800/70 dark:text-amber-300/60 hover:text-amber-800 dark:hover:text-amber-300 border border-transparent hover:border-amber-500/20 transition-colors"
+                  >
+                    Alle
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const dows = [
+                        ...new Set(
+                          sessions
+                            .filter((s) => !s.is_cancelled)
+                            .map((s) => s.day_of_week),
+                        ),
+                      ].sort((a, b) => a - b);
+                      setNoteVisibleDow(dows.length ? dows : [0, 1, 2, 3, 4, 5, 6]);
+                    }}
+                    className="px-2.5 h-7 rounded-md text-[11px] font-medium text-amber-800/70 dark:text-amber-300/60 hover:text-amber-800 dark:hover:text-amber-300 border border-transparent hover:border-amber-500/20 transition-colors"
+                  >
+                    Nur Trainingstage
+                  </button>
+                </div>
+              </div>
+
               <div className="flex items-center gap-3">
                 <button
                   type="button"
-                  onClick={() => saveNote(noteText)}
+                  onClick={() => saveNote(noteText, noteVisibleDow)}
                   disabled={noteSaving}
                   className="h-8 px-4 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold disabled:opacity-50 transition-colors"
                 >
@@ -1703,7 +1790,7 @@ export function WeeklyPlanEditor({
             </div>
           </div>
           <p className="text-xs text-muted-foreground px-1">
-            Diese Notiz wird in der öffentlichen Ansicht oben als Hinweisbanner angezeigt, solange die Woche aktiv ist. Leer lassen, um kein Banner anzuzeigen.
+            Diese Notiz wird in der öffentlichen Ansicht oben als Hinweisbanner angezeigt — aber nur an den ausgewählten Wochentagen. Leer lassen, um kein Banner anzuzeigen.
           </p>
         </motion.div>
       )}
@@ -1859,6 +1946,21 @@ export function WeeklyPlanEditor({
           clubId={club.id}
           canEdit={canEdit}
           onClose={() => { setAttendanceSession(null); setAttendanceSummaryRevision((r) => r + 1); }}
+          onLocalSessionPatch={(patch) => {
+            suppressRealtimeRef.current = true;
+            const targetId = attendanceSession.id;
+            setWeek((w) => w ? {
+              ...w,
+              training_sessions: (w.training_sessions ?? []).map((s) =>
+                s.id === targetId ? { ...s, ...patch } : s,
+              ),
+            } : w);
+            // Also refresh the currently-open modal's `session` prop so the
+            // initial useState mirror matches the persisted value on next open.
+            setAttendanceSession((cur) =>
+              cur && cur.id === targetId ? { ...cur, ...patch } : cur,
+            );
+          }}
         />
       )}
 

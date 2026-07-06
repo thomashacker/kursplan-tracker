@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { notFound } from "next/navigation";
 import type { TrainingSession, TrainingWeek, Club, Location } from "@/types";
 import { DAY_NAMES } from "@/types";
-import { getCurrentMonday, offsetWeek, toISODate, getSessionDate } from "@/lib/utils/date";
+import { getCurrentMonday, getCurrentDayOfWeek, offsetWeek, toISODate, getSessionDate } from "@/lib/utils/date";
 import PublicPlanClient from "./PublicPlanClient";
 import type { PublicSession, ColorMap } from "./PublicPlanClient";
 import { SiteFooter } from "@/components/layout/SiteFooter";
@@ -227,8 +227,14 @@ export default async function PublicPlanPage({
     a.dateKey.localeCompare(b.dateKey) || a.timeStart.localeCompare(b.timeStart)
   );
 
-  // Show the current week's note as a banner (only if it's the active week)
-  const currentWeekNote = (weeks ?? []).find(w => w.week_start === monday)?.notes ?? null;
+  // Show the current week's note as a banner — but only on the weekdays the
+  // trainer selected for it. Default (all 7 days) preserves the previous
+  // "any note = always show" behavior for pre-migration weeks.
+  const currentWeek = (weeks ?? []).find((w) => w.week_start === monday);
+  const todayDow = getCurrentDayOfWeek();
+  const visibleDow = currentWeek?.notes_visible_dow ?? [0, 1, 2, 3, 4, 5, 6];
+  const currentWeekNote =
+    currentWeek?.notes && visibleDow.includes(todayDow) ? currentWeek.notes : null;
 
   // Extract unique filter options (only from non-cancelled sessions)
   const active = sessions.filter((s) => !s.isCancelled);

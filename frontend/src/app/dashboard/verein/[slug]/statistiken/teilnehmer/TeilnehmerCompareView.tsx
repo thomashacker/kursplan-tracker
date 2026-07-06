@@ -10,6 +10,7 @@ import {
   YAxis,
 } from "recharts";
 import { Search, X } from "lucide-react";
+import { toast } from "sonner";
 
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -148,11 +149,30 @@ export function TeilnehmerCompareView({
   }, [visibleTeilnehmer, groupFilter, groupById, groupsByTeilnehmer, groups]);
 
   // Attendance cache per teilnehmer: session_ids where status='present'.
+  // Keyed implicitly by the current `sessions` window — we clear it whenever
+  // the window changes so we don't count attendance against stale session IDs.
   const [attendanceCache, setAttendanceCache] = useState<
     Record<string, Set<string>>
   >({});
   const [loadingIds, setLoadingIds] = useState<Set<string>>(new Set());
   const inflightRef = useRef<Set<string>>(new Set());
+
+  // Signature of the current session window. When the time window picker
+  // changes, the parent server component re-renders with a different set of
+  // session IDs — any cached attendance is now filtered against the wrong IDs.
+  const sessionsKey = useMemo(
+    () => sessions.map((s) => s.id).join(","),
+    [sessions],
+  );
+
+  useEffect(() => {
+    // Reset cache + in-flight tracking on window change so the fetch effect
+    // re-runs for every currently selected teilnehmer against the new IDs.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setAttendanceCache({});
+    inflightRef.current.clear();
+    setLoadingIds(new Set());
+  }, [sessionsKey]);
 
   useEffect(() => {
     const toFetch = [...selectedIds].filter(
@@ -169,32 +189,58 @@ export function TeilnehmerCompareView({
     (async () => {
       const supabase = createClient();
       const sessionIds = sessions.map((s) => s.id);
-      if (!sessionIds.length) {
-        setAttendanceCache((prev) => {
-          const next = { ...prev };
-          for (const id of toFetch) next[id] = new Set();
-          return next;
-        });
+
+      const clearInflight = () => {
         for (const id of toFetch) inflightRef.current.delete(id);
         setLoadingIds((prev) => {
           const next = new Set(prev);
           for (const id of toFetch) next.delete(id);
           return next;
         });
+      };
+
+      if (!sessionIds.length) {
+        setAttendanceCache((prev) => {
+          const next = { ...prev };
+          for (const id of toFetch) next[id] = new Set();
+          return next;
+        });
+        clearInflight();
         return;
       }
 
-      const { data } = await supabase
-        .from("session_attendance")
-        .select("teilnehmer_id, session_id")
-        .eq("status", "present")
-        .in("teilnehmer_id", toFetch)
-        .in("session_id", sessionIds);
+      // Chunk session IDs to avoid URL-length limits: `.in("session_id", [...])`
+      // becomes `?session_id=in.(uuid,uuid,...)` in the GET, and long windows
+      // (200+ sessions × 36-char UUIDs) can exceed proxy/CDN limits, causing a
+      // silent 4xx that poisons the cache with empty sets. Splitting keeps each
+      // request comfortably under the limit.
+      const CHUNK = 100;
+      const chunks: string[][] = [];
+      for (let i = 0; i < sessionIds.length; i += CHUNK) {
+        chunks.push(sessionIds.slice(i, i + CHUNK));
+      }
 
       const byTeilnehmer = new Map<string, Set<string>>();
       for (const id of toFetch) byTeilnehmer.set(id, new Set());
-      for (const row of data ?? []) {
-        byTeilnehmer.get(row.teilnehmer_id)?.add(row.session_id);
+
+      for (const chunk of chunks) {
+        const { data, error } = await supabase
+          .from("session_attendance")
+          .select("teilnehmer_id, session_id")
+          .eq("status", "present")
+          .in("teilnehmer_id", toFetch)
+          .in("session_id", chunk);
+
+        if (error) {
+          // Don't populate the cache on failure — leaving the IDs uncached
+          // means a fresh selection (or window switch) will retry them.
+          clearInflight();
+          toast.error("Teilnehmer-Daten konnten nicht geladen werden");
+          return;
+        }
+        for (const row of data ?? []) {
+          byTeilnehmer.get(row.teilnehmer_id)?.add(row.session_id);
+        }
       }
 
       setAttendanceCache((prev) => {
@@ -202,12 +248,7 @@ export function TeilnehmerCompareView({
         for (const [id, set] of byTeilnehmer) next[id] = set;
         return next;
       });
-      for (const id of toFetch) inflightRef.current.delete(id);
-      setLoadingIds((prev) => {
-        const next = new Set(prev);
-        for (const id of toFetch) next.delete(id);
-        return next;
-      });
+      clearInflight();
     })();
   }, [selectedIds, attendanceCache, sessions]);
 
