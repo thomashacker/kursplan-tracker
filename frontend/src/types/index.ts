@@ -60,6 +60,8 @@ export interface TrainingWeek {
   week_start: string; // ISO date string (YYYY-MM-DD)
   is_published: boolean;
   notes: string | null;
+  // Days of the week the notes banner is visible (0=Mo … 6=So).
+  notes_visible_dow: number[];
   created_by: string;
   created_at: string;
   updated_at: string;

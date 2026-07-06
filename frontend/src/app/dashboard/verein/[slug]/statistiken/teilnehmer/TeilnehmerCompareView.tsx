@@ -171,7 +171,6 @@ export function TeilnehmerCompareView({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setAttendanceCache({});
     inflightRef.current.clear();
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoadingIds(new Set());
   }, [sessionsKey]);
 

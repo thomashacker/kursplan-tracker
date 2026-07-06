@@ -26,6 +26,17 @@ export function getCurrentMonday(): string {
   return toISODate(monday);
 }
 
+/**
+ * Get today's day-of-week in the app's 0-indexed convention:
+ * 0 = Monday, 1 = Tuesday, …, 6 = Sunday.
+ *
+ * Matches `training_sessions.day_of_week` and `notes_visible_dow`.
+ */
+export function getCurrentDayOfWeek(): number {
+  const jsDay = new Date().getDay(); // 0=Sun … 6=Sat
+  return jsDay === 0 ? 6 : jsDay - 1;
+}
+
 /** Offset a week Monday by N weeks */
 export function offsetWeek(mondayIso: string, weeks: number): string {
   const d = new Date(mondayIso + "T00:00:00");
