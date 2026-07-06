@@ -22,12 +22,14 @@ export type DailyPoint = {
   dateISO: string;
   sessions: number;
   checkIns: number;
+  probetraining: number;
 };
 
 export type WeekdayPoint = {
   dow: number; // 0=Mo … 6=So
   sessions: number;
   checkIns: number;
+  probetraining: number;
 };
 
 const DAY_SHORT = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
@@ -39,14 +41,21 @@ function formatTickDate(iso: string): string {
 
 const COLOR_BAR = "rgb(37 99 235)"; // blue-600
 const COLOR_LINE = "rgb(34 197 94)"; // green-500
+const COLOR_PROBE = "rgb(23 23 23)"; // near-black; softer in dark via currentColor fallback
 
 interface Props {
   daily: DailyPoint[];
   weekday: WeekdayPoint[];
   hasAttendance: boolean;
+  hasProbetraining: boolean;
 }
 
-export function ActivityChart({ daily, weekday, hasAttendance }: Props) {
+export function ActivityChart({
+  daily,
+  weekday,
+  hasAttendance,
+  hasProbetraining,
+}: Props) {
   const [mode, setMode] = useState<"daily" | "weekday">("daily");
 
   const rows =
@@ -55,16 +64,19 @@ export function ActivityChart({ daily, weekday, hasAttendance }: Props) {
           label: formatTickDate(p.dateISO),
           sessions: p.sessions,
           checkIns: p.checkIns,
+          probetraining: p.probetraining,
         }))
       : weekday.map((p) => ({
           label: DAY_SHORT[p.dow] ?? "",
           sessions: p.sessions,
           checkIns: p.checkIns,
+          probetraining: p.probetraining,
         }));
 
   const N = rows.length;
   const maxSessions = Math.max(0, ...rows.map((r) => r.sessions));
   const maxCheckIns = Math.max(0, ...rows.map((r) => r.checkIns));
+  const maxProbe = Math.max(0, ...rows.map((r) => r.probetraining));
   const maxIdx =
     hasAttendance && maxCheckIns > 0
       ? rows.findIndex((r) => r.checkIns === maxCheckIns)
@@ -73,6 +85,7 @@ export function ActivityChart({ daily, weekday, hasAttendance }: Props) {
   const chartConfig: ChartConfig = {
     sessions: { label: "Trainings", color: COLOR_BAR },
     checkIns: { label: "Check-ins", color: COLOR_LINE },
+    probetraining: { label: "Probetraining", color: COLOR_PROBE },
   };
 
   // Cap bar width so they don't get visually fat on weekday view (N=7).
@@ -131,6 +144,20 @@ export function ActivityChart({ daily, weekday, hasAttendance }: Props) {
               </span>
             </div>
           )}
+          {hasProbetraining && (
+            <div className="flex items-center gap-2">
+              <span
+                className="inline-block w-4 border-t-2 border-dotted"
+                style={{ borderColor: COLOR_PROBE }}
+              />
+              <span className="text-muted-foreground">
+                Probetraining
+                <span className="text-foreground font-semibold ml-1.5">
+                  · max {maxProbe}
+                </span>
+              </span>
+            </div>
+          )}
         </div>
 
         {N === 0 ? (
@@ -173,7 +200,7 @@ export function ActivityChart({ daily, weekday, hasAttendance }: Props) {
                   fontWeight: 600,
                 }}
               />
-              {hasAttendance && (
+              {(hasAttendance || hasProbetraining) && (
                 <YAxis
                   yAxisId="R"
                   orientation="right"
@@ -183,7 +210,8 @@ export function ActivityChart({ daily, weekday, hasAttendance }: Props) {
                   allowDecimals={false}
                   tick={{
                     fontSize: 10,
-                    fill: COLOR_LINE,
+                    fill: hasAttendance ? COLOR_LINE : "currentColor",
+                    opacity: hasAttendance ? 1 : 0.6,
                     fontWeight: 600,
                   }}
                 />
@@ -209,6 +237,23 @@ export function ActivityChart({ daily, weekday, hasAttendance }: Props) {
                   dot={false}
                   activeDot={{
                     r: 4,
+                    stroke: "var(--card)",
+                    strokeWidth: 2,
+                  }}
+                  isAnimationActive={false}
+                />
+              )}
+              {hasProbetraining && (
+                <Line
+                  yAxisId="R"
+                  type="monotone"
+                  dataKey="probetraining"
+                  stroke="var(--color-probetraining)"
+                  strokeWidth={1.75}
+                  strokeDasharray="4 3"
+                  dot={false}
+                  activeDot={{
+                    r: 3,
                     stroke: "var(--card)",
                     strokeWidth: 2,
                   }}

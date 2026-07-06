@@ -118,6 +118,7 @@ export interface TrainingSession {
   notes: string | null;
   color: string | null;
   sort_order: number | null;
+  probetraining_count: number; // trial visitors — anonymous counter
   created_at: string;
   updated_at: string;
   // attendance

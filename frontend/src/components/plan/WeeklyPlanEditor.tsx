@@ -1195,6 +1195,7 @@ export function WeeklyPlanEditor({
             locations: locations.find((l) => l.id === data.location_id),
             trainer_id: trainer_ids[0] ?? null, is_cancelled: data.is_cancelled,
             color: data.color, sort_order: data.sort_order, template_id: null, is_modified: false,
+            probetraining_count: 0,
             session_trainers: [
               ...trainer_ids.map((uid) => ({ session_id: created.id, user_id: uid, virtual_trainer_id: null })),
               ...virtual_trainer_ids.map((vid) => ({ session_id: created.id, user_id: null, virtual_trainer_id: vid })),
@@ -1355,6 +1356,9 @@ export function WeeklyPlanEditor({
 
     setEditingSession(null);
     setHasChanges(true);
+    // Force the attendance-summary effect to re-run so newly-added / removed
+    // expected groups show up on the session cards without a page refresh.
+    setAttendanceSummaryRevision((r) => r + 1);
     startTransition(() => router.refresh());
   }
 
@@ -1367,6 +1371,9 @@ export function WeeklyPlanEditor({
     const layout = getOverlapLayout(daySessions);
     const sourceLane = layout.get(sourceId)?.lane ?? 0;
     if (targetLane === sourceLane) return;
+
+    // Own write — the realtime echo shouldn't surface as "changed by another user".
+    suppressRealtimeRef.current = true;
 
     // First session at the target lane that overlaps source in time becomes
     // the swap partner. Any further occupants stay put and will visually
@@ -1859,6 +1866,21 @@ export function WeeklyPlanEditor({
           clubId={club.id}
           canEdit={canEdit}
           onClose={() => { setAttendanceSession(null); setAttendanceSummaryRevision((r) => r + 1); }}
+          onLocalSessionPatch={(patch) => {
+            suppressRealtimeRef.current = true;
+            const targetId = attendanceSession.id;
+            setWeek((w) => w ? {
+              ...w,
+              training_sessions: (w.training_sessions ?? []).map((s) =>
+                s.id === targetId ? { ...s, ...patch } : s,
+              ),
+            } : w);
+            // Also refresh the currently-open modal's `session` prop so the
+            // initial useState mirror matches the persisted value on next open.
+            setAttendanceSession((cur) =>
+              cur && cur.id === targetId ? { ...cur, ...patch } : cur,
+            );
+          }}
         />
       )}
 

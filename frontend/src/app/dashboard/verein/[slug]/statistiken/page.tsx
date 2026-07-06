@@ -91,7 +91,7 @@ export default async function StatistikenPage({
   const { data: pastWeeks } = await supabase
     .from("training_weeks")
     .select(
-      "week_start, training_sessions(id, time_start, time_end, is_cancelled, day_of_week, topics, session_types, session_trainers(user_id, virtual_trainer_id))",
+      "week_start, training_sessions(id, time_start, time_end, is_cancelled, day_of_week, topics, session_types, probetraining_count, session_trainers(user_id, virtual_trainer_id))",
     )
     .eq("club_id", club.id)
     .gte("week_start", fromMondayISO)
@@ -114,6 +114,7 @@ export default async function StatistikenPage({
 
   let totalSessions = 0;
   let totalMinutes = 0;
+  let totalProbetraining = 0;
 
   type SessionMeta = {
     id: string;
@@ -123,6 +124,7 @@ export default async function StatistikenPage({
     day_of_week: number;
     topics: string[];
     session_types: string[];
+    probetraining_count: number;
     week_start: string;
   };
 
@@ -148,6 +150,7 @@ export default async function StatistikenPage({
       allSessions.push({ ...s, week_start: week.week_start });
       const dur = durationMin(s.time_start, s.time_end);
       totalMinutes += dur;
+      totalProbetraining += s.probetraining_count ?? 0;
 
       for (const st of (
         s as unknown as {
@@ -267,21 +270,32 @@ export default async function StatistikenPage({
   }
 
   // ── Activity chart series (daily timeline + weekday bucket) ──
-  const dailyAggMap = new Map<string, { sessions: number; checkIns: number }>();
+  const dailyAggMap = new Map<
+    string,
+    { sessions: number; checkIns: number; probetraining: number }
+  >();
   const dayCheckIns = new Array(7).fill(0) as number[];
+  const dayProbetraining = new Array(7).fill(0) as number[];
   const daySessionCount = new Array(7).fill(0) as number[];
 
   for (const s of allSessions) {
     const dow = s.day_of_week ?? 0;
     const sCheckIns = sessionCheckInMap.get(s.id) ?? 0;
+    const sProbe = s.probetraining_count ?? 0;
     daySessionCount[dow]++;
     dayCheckIns[dow] += sCheckIns;
+    dayProbetraining[dow] += sProbe;
 
     const iso = toISODate(getSessionDate(s.week_start, s.day_of_week));
-    const prev = dailyAggMap.get(iso) ?? { sessions: 0, checkIns: 0 };
+    const prev = dailyAggMap.get(iso) ?? {
+      sessions: 0,
+      checkIns: 0,
+      probetraining: 0,
+    };
     dailyAggMap.set(iso, {
       sessions: prev.sessions + 1,
       checkIns: prev.checkIns + sCheckIns,
+      probetraining: prev.probetraining + sProbe,
     });
   }
 
@@ -292,7 +306,8 @@ export default async function StatistikenPage({
   endDateOnly.setHours(0, 0, 0, 0);
   while (cursor.getTime() <= endDateOnly.getTime()) {
     const iso = toISODate(cursor);
-    const v = dailyAggMap.get(iso) ?? { sessions: 0, checkIns: 0 };
+    const v =
+      dailyAggMap.get(iso) ?? { sessions: 0, checkIns: 0, probetraining: 0 };
     dailySeries.push({ dateISO: iso, ...v });
     cursor.setDate(cursor.getDate() + 1);
   }
@@ -301,6 +316,7 @@ export default async function StatistikenPage({
     dow,
     sessions: daySessionCount[dow],
     checkIns: dayCheckIns[dow],
+    probetraining: dayProbetraining[dow],
   }));
 
   // ── Topic & Trainingsart attendance ──────────────────────────
@@ -468,6 +484,8 @@ export default async function StatistikenPage({
     (hasGroupStats || topicRows.length > 0 || typeRows.length > 0);
   const hasTrainerDetail = trainerRows.length > 0;
 
+  const hasProbetraining = totalProbetraining > 0;
+
   const kpis: {
     label: string;
     value: React.ReactNode;
@@ -482,6 +500,11 @@ export default async function StatistikenPage({
     },
     { label: "Unique Check-ins", value: uniqueParticipants },
     { label: "Ø pro Training", value: avgCheckIns ?? "—" },
+    {
+      label: "Probetraining",
+      value: totalProbetraining,
+      accent: hasProbetraining ? "text-amber-600 dark:text-amber-400" : "",
+    },
     { label: "Teilnehmer", value: totalTeilnehmer ?? 0 },
     { label: "Gruppen", value: groupCount },
   ];
@@ -533,14 +556,12 @@ export default async function StatistikenPage({
         <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground group-hover:translate-x-0.5 transition-all shrink-0" />
       </Link>
 
-      {/* ── KPI grid (7 cards) ──────────────────────────────── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
-        {kpis.map((k, i, arr) => (
+      {/* ── KPI grid (8 cards: 2/4/8 columns) ─────────────────── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
+        {kpis.map((k) => (
           <div
             key={k.label}
-            className={`rounded-2xl border border-border bg-card p-4 sm:p-5 ${
-              i === arr.length - 1 ? "col-span-2 md:col-span-1" : ""
-            }`}
+            className="rounded-2xl border border-border bg-card p-4 sm:p-5"
           >
             <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1.5 leading-tight">
               {k.label}
@@ -560,6 +581,7 @@ export default async function StatistikenPage({
         daily={dailySeries}
         weekday={weekdaySeries}
         hasAttendance={hasAttendanceData}
+        hasProbetraining={hasProbetraining}
       />
 
       {/* ── Attendance details (collapsible) ────────────────── */}
