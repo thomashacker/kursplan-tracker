@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Bar,
   CartesianGrid,
@@ -46,6 +46,11 @@ const COLOR_PROBE = "rgb(23 23 23)"; // near-black; softer in dark via currentCo
 interface Props {
   daily: DailyPoint[];
   weekday: WeekdayPoint[];
+  /** Same-shape series filtered to a single group, keyed by group id. */
+  dailyByGroup?: Record<string, DailyPoint[]>;
+  weekdayByGroup?: Record<string, WeekdayPoint[]>;
+  /** Group choices for the filter dropdown — only groups that had activity in the window. */
+  groups?: { id: string; name: string; color: string | null }[];
   hasAttendance: boolean;
   hasProbetraining: boolean;
 }
@@ -53,20 +58,45 @@ interface Props {
 export function ActivityChart({
   daily,
   weekday,
+  dailyByGroup,
+  weekdayByGroup,
+  groups = [],
   hasAttendance,
   hasProbetraining,
 }: Props) {
   const [mode, setMode] = useState<"daily" | "weekday">("daily");
+  const [selectedGroup, setSelectedGroup] = useState<"all" | string>("all");
+  const [groupMenuOpen, setGroupMenuOpen] = useState(false);
+  const groupMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onOutside(e: MouseEvent) {
+      if (groupMenuRef.current && !groupMenuRef.current.contains(e.target as Node)) {
+        setGroupMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onOutside);
+    return () => document.removeEventListener("mousedown", onOutside);
+  }, []);
+
+  // Pick the daily/weekday source based on the group filter. "all" always
+  // uses the base series; a group id uses the per-group pre-computed one,
+  // falling back to base when the map doesn't have it (defensive).
+  const dailySrc = selectedGroup === "all" ? daily : dailyByGroup?.[selectedGroup] ?? daily;
+  const weekdaySrc = selectedGroup === "all" ? weekday : weekdayByGroup?.[selectedGroup] ?? weekday;
+
+  const activeGroup = groups.find((g) => g.id === selectedGroup);
+  const groupLabel = activeGroup?.name ?? "Alle Gruppen";
 
   const rows =
     mode === "daily"
-      ? daily.map((p) => ({
+      ? dailySrc.map((p) => ({
           label: formatTickDate(p.dateISO),
           sessions: p.sessions,
           checkIns: p.checkIns,
           probetraining: p.probetraining,
         }))
-      : weekday.map((p) => ({
+      : weekdaySrc.map((p) => ({
           label: DAY_SHORT[p.dow] ?? "",
           sessions: p.sessions,
           checkIns: p.checkIns,
@@ -97,21 +127,85 @@ export function ActivityChart({
         <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
           Aktivität
         </p>
-        <div className="flex gap-1 p-1 rounded-xl bg-secondary/50 border border-border">
-          {(["daily", "weekday"] as const).map((m) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => setMode(m)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                mode === m
-                  ? "bg-background shadow-sm text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {m === "daily" ? "Pro Tag" : "Pro Wochentag"}
-            </button>
-          ))}
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Group filter — only shown when at least one group had activity */}
+          {groups.length > 0 && (
+            <div className="relative" ref={groupMenuRef}>
+              <button
+                type="button"
+                onClick={() => setGroupMenuOpen((o) => !o)}
+                className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border text-xs font-medium transition-colors ${
+                  selectedGroup === "all"
+                    ? "border-border text-muted-foreground hover:text-foreground hover:bg-secondary"
+                    : "border-primary/40 bg-primary/5 text-primary"
+                }`}
+                aria-haspopup="listbox"
+                aria-expanded={groupMenuOpen}
+              >
+                {activeGroup?.color && (
+                  <span
+                    className="w-2 h-2 rounded-full shrink-0"
+                    style={{ backgroundColor: activeGroup.color }}
+                  />
+                )}
+                <span className="truncate max-w-[8rem]">{groupLabel}</span>
+                <svg
+                  width="10" height="10" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                  className={`shrink-0 transition-transform ${groupMenuOpen ? "rotate-180" : ""}`}
+                >
+                  <polyline points="6 9 12 15 18 9"/>
+                </svg>
+              </button>
+              {groupMenuOpen && (
+                <div className="absolute right-0 top-9 z-20 w-52 max-h-72 overflow-y-auto rounded-xl border border-border bg-popover shadow-lg py-1">
+                  <button
+                    type="button"
+                    onClick={() => { setSelectedGroup("all"); setGroupMenuOpen(false); }}
+                    className={`w-full flex items-center gap-2 px-3 py-2 text-xs text-left transition-colors ${
+                      selectedGroup === "all" ? "bg-secondary/60 font-semibold" : "hover:bg-secondary"
+                    }`}
+                  >
+                    <span className="w-2 h-2 rounded-full shrink-0 border border-current opacity-40" />
+                    Alle Gruppen
+                  </button>
+                  <div className="h-px bg-border my-1" />
+                  {groups.map((g) => (
+                    <button
+                      key={g.id}
+                      type="button"
+                      onClick={() => { setSelectedGroup(g.id); setGroupMenuOpen(false); }}
+                      className={`w-full flex items-center gap-2 px-3 py-2 text-xs text-left transition-colors ${
+                        selectedGroup === g.id ? "bg-secondary/60 font-semibold" : "hover:bg-secondary"
+                      }`}
+                    >
+                      <span
+                        className="w-2 h-2 rounded-full shrink-0"
+                        style={{ backgroundColor: g.color ?? "#94a3b8" }}
+                      />
+                      <span className="truncate">{g.name}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          <div className="flex gap-1 p-1 rounded-xl bg-secondary/50 border border-border">
+            {(["daily", "weekday"] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setMode(m)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                  mode === m
+                    ? "bg-background shadow-sm text-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {m === "daily" ? "Pro Tag" : "Pro Wochentag"}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 

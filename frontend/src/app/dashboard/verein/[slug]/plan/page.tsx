@@ -42,7 +42,7 @@ export default async function PlanPage({
   // Fetch week with sessions, locations, and session_trainers
   const { data: week } = await supabase
     .from("training_weeks")
-    .select("*, training_sessions(*, locations(*), session_trainers(session_id, user_id, virtual_trainer_id))")
+    .select("*, training_sessions(*, locations(*), session_trainers(session_id, user_id, virtual_trainer_id), session_media(id, session_id, kind, url, caption, sort_order))")
     .eq("club_id", club.id)
     .eq("week_start", weekStart)
     .single<TrainingWeek>();

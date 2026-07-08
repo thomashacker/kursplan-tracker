@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { notFound } from "next/navigation";
-import type { TrainingSession, TrainingWeek, Club, Location } from "@/types";
+import type { TrainingSession, TrainingWeek, Club, Location, SessionMedia } from "@/types";
 import { DAY_NAMES } from "@/types";
 import { getCurrentMonday, getCurrentDayOfWeek, offsetWeek, toISODate, getSessionDate } from "@/lib/utils/date";
 import PublicPlanClient from "./PublicPlanClient";
@@ -71,18 +71,73 @@ export default async function PublicPlanPage({
   const monday = getCurrentMonday();
   const until  = offsetWeek(monday, 9);
 
-  const { data: weeks } = await supabase
-    .from("training_weeks")
-    .select("*, training_sessions(*, locations(*), session_trainers(user_id, virtual_trainer_id))")
-    .eq("club_id", club.id)
-    .eq("is_published", true)
-    .gte("week_start", monday)
-    .lte("week_start", until)
-    .order("week_start", { ascending: true })
-    .returns<TrainingWeek[]>();
+  const todayStrForFetch = toISODate(new Date());
+
+  // Two fetches:
+  //   • Published trainings in the current 9-week window (unchanged).
+  //   • ALL future events for the club, independent of the week window and
+  //     of the week's is_published flag — events are important announcements
+  //     and must not disappear just because a trainer hasn't published the
+  //     week they were drafted in.
+  const [{ data: weeks }, { data: futureEventRows }] = await Promise.all([
+    supabase
+      .from("training_weeks")
+      .select("*, training_sessions(*, locations(*), session_trainers(user_id, virtual_trainer_id), session_media(id, session_id, kind, url, caption, sort_order))")
+      .eq("club_id", club.id)
+      .eq("is_published", true)
+      .gte("week_start", monday)
+      .lte("week_start", until)
+      .order("week_start", { ascending: true })
+      .returns<TrainingWeek[]>(),
+    supabase
+      .from("training_sessions")
+      .select("*, training_weeks!inner(week_start, club_id), locations(*), session_trainers(user_id, virtual_trainer_id), session_media(id, session_id, kind, url, caption, sort_order)")
+      .eq("training_weeks.club_id", club.id)
+      .eq("kind", "event")
+      .gte("event_date", todayStrForFetch)
+      .order("event_date", { ascending: true }),
+  ]);
+
+  // Merge event rows that were NOT already returned via the training_weeks
+  // fetch, so events living in unpublished / out-of-window weeks still surface.
+  type EventJoinRow = TrainingSession & {
+    training_weeks?: { week_start: string; club_id: string };
+    locations?: Location;
+    session_media?: SessionMedia[];
+  };
+  const seenIds = new Set(
+    (weeks ?? []).flatMap((w) => (w.training_sessions ?? []).map((s) => s.id)),
+  );
+  const extraEventsByWeek = new Map<string, EventJoinRow[]>();
+  for (const row of (futureEventRows ?? []) as EventJoinRow[]) {
+    if (seenIds.has(row.id)) continue;
+    const ws = row.training_weeks?.week_start ?? monday;
+    (extraEventsByWeek.get(ws) ?? extraEventsByWeek.set(ws, []).get(ws)!).push(row);
+  }
+  const mergedWeeks: TrainingWeek[] = [...(weeks ?? [])];
+  for (const [ws, rows] of extraEventsByWeek) {
+    const existing = mergedWeeks.find((w) => w.week_start === ws);
+    if (existing) {
+      existing.training_sessions = [...(existing.training_sessions ?? []), ...rows];
+    } else {
+      // Synthesize a lightweight week entry so the outer loop can iterate it.
+      mergedWeeks.push({
+        id: `synthetic-${ws}`,
+        club_id: club.id,
+        week_start: ws,
+        is_published: true,
+        notes: null,
+        notes_visible_dow: [0, 1, 2, 3, 4, 5, 6],
+        created_by: "",
+        created_at: "",
+        updated_at: "",
+        training_sessions: rows,
+      });
+    }
+  }
 
   // Resolve trainer names (skip entirely when admin has hidden trainers from public view)
-  const allSessions = (weeks ?? []).flatMap((w) => w.training_sessions ?? []);
+  const allSessions = mergedWeeks.flatMap((w) => w.training_sessions ?? []);
 
   type RawST = { user_id: string | null; virtual_trainer_id: string | null };
 
@@ -174,9 +229,12 @@ export default async function PublicPlanPage({
 
   const sessions: PublicSession[] = [];
 
-  for (const week of weeks ?? []) {
-    for (const session of (week.training_sessions ?? []) as (TrainingSession & { locations?: Location })[]) {
-      const date = getSessionDate(week.week_start, session.day_of_week);
+  for (const week of mergedWeeks) {
+    for (const session of (week.training_sessions ?? []) as (TrainingSession & { locations?: Location; session_media?: SessionMedia[] })[]) {
+      // Events use their own event_date; trainings derive from week+dow.
+      const date = session.kind === "event" && session.event_date
+        ? new Date(session.event_date + "T00:00:00")
+        : getSessionDate(week.week_start, session.day_of_week);
       const dateKey = toISODate(date);
       if (dateKey < todayStr) continue;
       if (dateKey === todayStr && timeToMin(session.time_start) < nowMin) continue;
@@ -194,6 +252,11 @@ export default async function PublicPlanPage({
         .filter((p): p is { name: string; avatarUrl: string | null } => Boolean(p));
       const trainers = [...registeredTrainers, ...virtualTrainers];
       const trainerNames = trainers.map((t) => t.name);
+
+      const media = (session.session_media ?? [])
+        .slice()
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+        .map((m) => ({ id: m.id, kind: m.kind, url: m.url, caption: m.caption }));
 
       sessions.push({
         id: session.id,
@@ -219,6 +282,11 @@ export default async function PublicPlanPage({
               color: g.color,
             }))
           : [],
+        kind: session.kind ?? "training",
+        isPinned: session.is_pinned ?? false,
+        title: session.title ?? null,
+        metadata: (session.metadata ?? {}) as Record<string, string>,
+        media,
       });
     }
   }

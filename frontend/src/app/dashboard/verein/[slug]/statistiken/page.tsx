@@ -92,7 +92,7 @@ export default async function StatistikenPage({
   const { data: pastWeeks } = await supabase
     .from("training_weeks")
     .select(
-      "week_start, training_sessions(id, time_start, time_end, is_cancelled, day_of_week, topics, session_types, probetraining_count, session_trainers(user_id, virtual_trainer_id))",
+      "week_start, training_sessions(id, time_start, time_end, is_cancelled, day_of_week, topics, session_types, probetraining_count, kind, session_trainers(user_id, virtual_trainer_id))",
     )
     .eq("club_id", club.id)
     .gte("week_start", fromMondayISO)
@@ -114,7 +114,6 @@ export default async function StatistikenPage({
   const virtualTrainerMap = new Map<string, TrainerStat>(); // virtual trainer ids
 
   let totalSessions = 0;
-  let totalMinutes = 0;
   let totalProbetraining = 0;
 
   type SessionMeta = {
@@ -126,6 +125,7 @@ export default async function StatistikenPage({
     topics: string[];
     session_types: string[];
     probetraining_count: number;
+    kind: "training" | "event";
     week_start: string;
   };
 
@@ -141,6 +141,7 @@ export default async function StatistikenPage({
       })[]
     ).filter(
       (s) =>
+        s.kind === "training" &&      // events are excluded from training KPIs
         !s.is_cancelled &&
         isInRange(week.week_start, s.day_of_week, s.time_end),
     );
@@ -150,7 +151,6 @@ export default async function StatistikenPage({
     for (const s of sessions) {
       allSessions.push({ ...s, week_start: week.week_start });
       const dur = durationMin(s.time_start, s.time_end);
-      totalMinutes += dur;
       totalProbetraining += s.probetraining_count ?? 0;
 
       for (const st of (
@@ -248,14 +248,6 @@ export default async function StatistikenPage({
   const totalExcused = (attendanceRows ?? []).filter(
     (a) => a.status === "excused",
   ).length;
-
-  const sessionsWithAttendance = new Set(
-    (attendanceRows ?? []).map((a) => a.session_id),
-  ).size;
-  const avgCheckIns =
-    sessionsWithAttendance > 0
-      ? (totalCheckIns / sessionsWithAttendance).toFixed(1)
-      : null;
 
   const hasAttendanceData = totalCheckIns > 0 || totalExcused > 0;
 
@@ -473,6 +465,67 @@ export default async function StatistikenPage({
   groupStats.sort((a, b) => b.rate - a.rate);
   const hasGroupStats = groupStats.length > 0;
 
+  // ── Per-group daily / weekday series for the activity chart ─────────────
+  // Pre-compute one series per group so the client can just swap them on
+  // filter change — no heavy work at render time. Groups that never had a
+  // session in the window are skipped (they'd render as flat lines).
+  type GroupChoice = { id: string; name: string; color: string | null };
+  const chartGroups: GroupChoice[] = [];
+  const dailyByGroup: Record<string, DailyPoint[]> = {};
+  const weekdayByGroup: Record<string, WeekdayPoint[]> = {};
+
+  for (const g of teilnehmerGroups ?? []) {
+    const members = groupMemberMap.get(g.id) ?? new Set<string>();
+    if (members.size === 0) continue;
+
+    const gAgg = new Map<string, { sessions: number; checkIns: number; probetraining: number }>();
+    const gDaySessions = new Array(7).fill(0) as number[];
+    const gDayCheckIns = new Array(7).fill(0) as number[];
+    const gDayProbe    = new Array(7).fill(0) as number[];
+    let touched = false;
+
+    for (const s of allSessions) {
+      if (!sessionGroupMap.get(s.id)?.has(g.id)) continue;
+      touched = true;
+      const dow = s.day_of_week ?? 0;
+      const presentSet = sessionPresentMap.get(s.id) ?? new Set<string>();
+      let checkIns = 0;
+      for (const memberId of members) if (presentSet.has(memberId)) checkIns++;
+      const probe = s.probetraining_count ?? 0;
+
+      gDaySessions[dow]++;
+      gDayCheckIns[dow] += checkIns;
+      gDayProbe[dow]    += probe;
+
+      const iso = toISODate(getSessionDate(s.week_start, s.day_of_week));
+      const prev = gAgg.get(iso) ?? { sessions: 0, checkIns: 0, probetraining: 0 };
+      gAgg.set(iso, {
+        sessions: prev.sessions + 1,
+        checkIns: prev.checkIns + checkIns,
+        probetraining: prev.probetraining + probe,
+      });
+    }
+    if (!touched) continue;
+
+    // Zero-fill the same date range as the "all" series so axes stay aligned.
+    const series: DailyPoint[] = [];
+    const c = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+    while (c.getTime() <= endDateOnly.getTime()) {
+      const iso = toISODate(c);
+      const v = gAgg.get(iso) ?? { sessions: 0, checkIns: 0, probetraining: 0 };
+      series.push({ dateISO: iso, ...v });
+      c.setDate(c.getDate() + 1);
+    }
+    dailyByGroup[g.id] = series;
+    weekdayByGroup[g.id] = Array.from({ length: 7 }, (_, dow) => ({
+      dow,
+      sessions: gDaySessions[dow],
+      checkIns: gDayCheckIns[dow],
+      probetraining: gDayProbe[dow],
+    }));
+    chartGroups.push({ id: g.id, name: g.name, color: g.color ?? null });
+  }
+
   // ── Teilnehmer roster (for growth stats) ─────────────────────
   const { data: rosterRows } = await supabase
     .from("teilnehmer")
@@ -494,8 +547,6 @@ export default async function StatistikenPage({
   const currentGrowth: GrowthDelta = growthBetween(roster, windowFromIso, windowToIso);
   const priorGrowth: GrowthDelta   = growthBetween(roster, toISODate(priorFrom), toISODate(priorTo));
 
-  const groupCount = teilnehmerGroups?.length ?? 0;
-
   const hasAttendanceDetail =
     hasAttendanceData &&
     (hasGroupStats || topicRows.length > 0 || typeRows.length > 0);
@@ -513,14 +564,11 @@ export default async function StatistikenPage({
     };
   }[] = [
     { label: "Trainings", value: totalSessions },
-    { label: "Stunden", value: fmtHours(totalMinutes) },
     {
-      label: "Check-ins",
-      value: totalCheckIns,
+      label: "Aktive Mitglieder",
+      value: uniqueParticipants,
       accent: hasAttendanceData ? "text-green-600 dark:text-green-400" : "",
     },
-    { label: "Unique Check-ins", value: uniqueParticipants },
-    { label: "Ø pro Training", value: avgCheckIns ?? "—" },
     {
       label: "Probetraining",
       value: totalProbetraining,
@@ -531,7 +579,6 @@ export default async function StatistikenPage({
       value: totalTeilnehmer,
       growth: { current: currentGrowth, prior: priorGrowth },
     },
-    { label: "Gruppen", value: groupCount },
   ];
 
   return (
@@ -582,7 +629,7 @@ export default async function StatistikenPage({
       </Link>
 
       {/* ── KPI grid (8 cards: 2/4/8 columns) ─────────────────── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {kpis.map((k) => {
           // Growth ribbon: net change over the current window + comparison to prior window.
           const g = k.growth;
@@ -645,6 +692,9 @@ export default async function StatistikenPage({
       <ActivityChart
         daily={dailySeries}
         weekday={weekdaySeries}
+        dailyByGroup={dailyByGroup}
+        weekdayByGroup={weekdayByGroup}
+        groups={chartGroups}
         hasAttendance={hasAttendanceData}
         hasProbetraining={hasProbetraining}
       />

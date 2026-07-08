@@ -100,6 +100,8 @@ export interface SessionTrainer {
   profiles?: Pick<Profile, "id" | "full_name">;
 }
 
+export type SessionKind = "training" | "event";
+
 export interface TrainingSession {
   id: string;
   week_id: string;
@@ -121,6 +123,12 @@ export interface TrainingSession {
   color: string | null;
   sort_order: number | null;
   probetraining_count: number; // trial visitors — anonymous counter
+  // event support
+  kind: SessionKind;
+  title: string | null;         // required when kind === "event"
+  is_pinned: boolean;           // always visible in public view even under filters
+  event_date: string | null;    // YYYY-MM-DD; set when kind === "event"
+  metadata: Record<string, unknown>; // capacity, signup_url, cost, age_range, …
   created_at: string;
   updated_at: string;
   // attendance
@@ -128,7 +136,36 @@ export interface TrainingSession {
   locations?: Location;
   profiles?: Profile; // trainer profile (deprecated, use session_trainers)
   session_trainers?: SessionTrainer[];
+  session_media?: SessionMedia[];
 }
+
+export type SessionMediaKind = "image" | "pdf" | "link";
+
+export interface SessionMedia {
+  id: string;
+  session_id: string;
+  kind: SessionMediaKind;
+  url: string;
+  caption: string | null;
+  sort_order: number;
+  created_by: string | null;
+  created_at: string;
+}
+
+/** Per-session cap on attached media (enforced client-side; UI hides upload above it). */
+export const SESSION_MEDIA_MAX = 5;
+export const SESSION_MEDIA_IMAGE_MAX_MB = 5;
+export const SESSION_MEDIA_PDF_MAX_MB   = 10;
+
+/** Common event-metadata field descriptors. Freeform jsonb so add-a-field is a one-line UI change. */
+export const EVENT_METADATA_FIELDS = [
+  { key: "capacity",       label: "Kapazität",        placeholder: "z.B. 20", type: "text" },
+  { key: "signup_url",     label: "Anmeldung (URL)",  placeholder: "https://…",  type: "url"  },
+  { key: "cost",           label: "Kosten",           placeholder: "z.B. €15 / kostenlos", type: "text" },
+  { key: "age_range",      label: "Altersgruppe",     placeholder: "z.B. U12–U16", type: "text" },
+  { key: "contact_name",   label: "Ansprechpartner",  placeholder: "Name",         type: "text" },
+  { key: "contact_email",  label: "Kontakt (E-Mail)", placeholder: "mail@…",       type: "email" },
+] as const;
 
 
 export interface SessionTemplate {
