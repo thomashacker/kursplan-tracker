@@ -6,8 +6,8 @@ import { useParams } from "next/navigation";
 import { toast } from "sonner";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { createClient } from "@/lib/supabase/client";
-import type { Club, ClubMembership, Invitation, Role, VirtualTrainer } from "@/types";
-import { ROLE_LABELS } from "@/types";
+import type { Club, ClubMembership, Invitation, Role, VirtualTrainer, TrainerAvailability } from "@/types";
+import { ROLE_LABELS, ABSENCE_REASON_LABELS } from "@/types";
 import {
   Dialog,
   DialogContent,
@@ -17,6 +17,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { AbsenceManagerDialog } from "@/components/trainer/AbsenceManagerDialog";
 
 const spring = { type: "spring" as const, stiffness: 300, damping: 28 };
 
@@ -25,6 +26,11 @@ const ROLE_OPTIONS: { value: Role; label: string; description: string }[] = [
   { value: "trainer", label: "Trainer", description: "Kann Trainingseinheiten bearbeiten" },
   { value: "member", label: "Mitglied", description: "Nur Lesezugriff auf den Plan" },
 ];
+
+function formatIsoShort(iso: string): string {
+  const [y, m, d] = iso.split("-");
+  return `${d}.${m}.${y}`;
+}
 
 function RoleBadge({ role }: { role: Role }) {
   const colors: Record<Role, string> = {
@@ -51,6 +57,8 @@ export default function MitgliederPage() {
 
   // Virtual trainers
   const [virtualTrainers, setVirtualTrainers] = useState<VirtualTrainer[]>([]);
+  // Upcoming absences (current + future) across the whole club
+  const [absences, setAbsences] = useState<TrainerAvailability[]>([]);
   const [trainerDialog, setTrainerDialog] = useState<{ mode: "add" | "edit"; trainer?: VirtualTrainer } | null>(null);
   const [trainerName, setTrainerName] = useState("");
   const [trainerAvatarUrl, setTrainerAvatarUrl] = useState<string | null>(null);
@@ -60,6 +68,13 @@ export default function MitgliederPage() {
   const [trainerNotes, setTrainerNotes] = useState("");
   const [trainerSaving, setTrainerSaving] = useState(false);
   const [removeTrainerTarget, setRemoveTrainerTarget] = useState<VirtualTrainer | null>(null);
+
+  // Absence-manager dialog target
+  const [absenceTarget, setAbsenceTarget] = useState<
+    | { kind: "user"; userId: string; name: string }
+    | { kind: "virtual"; virtualTrainerId: string; name: string }
+    | null
+  >(null);
 
   // Remove member confirm
   const [removeTarget, setRemoveTarget] = useState<{ id: string; name: string } | null>(null);
@@ -92,8 +107,10 @@ export default function MitgliederPage() {
     setClub(c);
     if (!c) return;
 
-    // Fetch memberships, invitations, and virtual trainers in parallel
-    const [{ data: m }, { data: inv }, { data: vt }] = await Promise.all([
+    const today = new Date().toISOString().slice(0, 10);
+
+    // Fetch memberships, invitations, virtual trainers, absences — parallel
+    const [{ data: m }, { data: inv }, { data: vt }, { data: abs }] = await Promise.all([
       supabase
         .from("club_memberships")
         .select("*")
@@ -107,8 +124,16 @@ export default function MitgliederPage() {
         .gt("expires_at", new Date().toISOString())
         .returns<Invitation[]>(),
       supabase.from("virtual_trainers").select("*").eq("club_id", c.id).order("name").returns<VirtualTrainer[]>(),
+      supabase
+        .from("trainer_availability")
+        .select("*")
+        .eq("club_id", c.id)
+        .gte("end_date", today)
+        .order("start_date", { ascending: true })
+        .returns<TrainerAvailability[]>(),
     ]);
     setVirtualTrainers(vt ?? []);
+    setAbsences(abs ?? []);
 
     const rawMemberships = (m ?? []) as ClubMembership[];
     const mine = rawMemberships.find((x) => x.user_id === user.id);
@@ -341,6 +366,54 @@ export default function MitgliederPage() {
         )}
       </div>
 
+      {/* ── Anstehende Abwesenheiten ───────────────────────── */}
+      {absences.length > 0 && (
+        <div className="mb-8">
+          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-3">
+            Anstehende Abwesenheiten
+          </p>
+          <div className="space-y-2">
+            {absences.map((a) => {
+              const today = new Date().toISOString().slice(0, 10);
+              const isCurrent = today >= a.start_date && today <= a.end_date;
+              const name = a.user_id
+                ? memberships.find((m) => m.user_id === a.user_id)?.profiles?.full_name ?? "Unbekannt"
+                : virtualTrainers.find((vt) => vt.id === a.virtual_trainer_id)?.name ?? "Unbekannt";
+              return (
+                <div
+                  key={a.id}
+                  className={`flex items-center gap-3 p-3 rounded-xl border ${
+                    isCurrent ? "border-amber-500/40 bg-amber-500/5" : "border-border bg-card"
+                  }`}
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-medium truncate">{name}</span>
+                      <span className={`inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full ${
+                        a.reason === "sick" ? "bg-rose-500/10 text-rose-700 dark:text-rose-400" :
+                        a.reason === "vacation" ? "bg-blue-500/10 text-blue-700 dark:text-blue-400" :
+                        "bg-secondary text-secondary-foreground"
+                      }`}>
+                        {ABSENCE_REASON_LABELS[a.reason]}
+                      </span>
+                      {isCurrent && (
+                        <span className="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-400">
+                          Aktuell
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {formatIsoShort(a.start_date)} – {formatIsoShort(a.end_date)}
+                      {a.note ? <> · <span className="truncate">{a.note}</span></> : null}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* ── Members list ────────────────────────────────────── */}
       <div className="flex items-center gap-1.5 mb-3">
         <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
@@ -401,6 +474,22 @@ export default function MitgliederPage() {
 
                   {/* Role */}
                   <RoleBadge role={m.role} />
+
+                  {/* Absence manager — trainers/admins only, and only shown to self or admins */}
+                  {(m.role === "admin" || m.role === "trainer") && (isMe || isAdmin) && (
+                    <button
+                      type="button"
+                      onClick={() => setAbsenceTarget({ kind: "user", userId: m.user_id, name })}
+                      className="shrink-0 h-7 w-7 flex items-center justify-center rounded-lg hover:bg-secondary text-muted-foreground transition-colors"
+                      aria-label={`Abwesenheiten von ${name} verwalten`}
+                      title="Abwesenheiten verwalten"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                        <line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+                      </svg>
+                    </button>
+                  )}
 
                   {/* Actions — admin only, not on self */}
                   {isAdmin && !isMe && (
@@ -526,6 +615,18 @@ export default function MitgliederPage() {
                     {/* Actions — admin only */}
                     {isAdmin && (
                       <div className="flex gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setAbsenceTarget({ kind: "virtual", virtualTrainerId: vt.id, name: vt.name })}
+                          className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-secondary text-muted-foreground transition-colors"
+                          aria-label="Abwesenheiten verwalten"
+                          title="Abwesenheiten verwalten"
+                        >
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                            <line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+                          </svg>
+                        </button>
                         <button
                           type="button"
                           onClick={() => openEditTrainer(vt)}
@@ -798,6 +899,18 @@ export default function MitgliederPage() {
         onConfirm={handleDeleteTrainer}
         onClose={() => setRemoveTrainerTarget(null)}
       />
+
+      {/* ── Absence manager ─────────────────────────────────── */}
+      {absenceTarget && club && (
+        <AbsenceManagerDialog
+          open
+          onClose={() => { setAbsenceTarget(null); load(); }}
+          clubId={club.id}
+          userId={absenceTarget.kind === "user" ? absenceTarget.userId : null}
+          virtualTrainerId={absenceTarget.kind === "virtual" ? absenceTarget.virtualTrainerId : null}
+          trainerName={absenceTarget.name}
+        />
+      )}
     </div>
   );
 }

@@ -1,10 +1,12 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { usePathname } from "next/navigation";
-import type { TrainingSession, Location, Profile, ClubTopic, ClubSessionType, SessionColor, VirtualTrainer, TeilnehmerGroup } from "@/types";
+import type { TrainingSession, Location, Profile, ClubTopic, ClubSessionType, SessionColor, VirtualTrainer, TeilnehmerGroup, TrainerAvailability } from "@/types";
 import { createClient } from "@/lib/supabase/client";
 import { DAY_NAMES, SESSION_COLORS } from "@/types";
+import { absencesOn, absenceSuffix, bucketWindows, type AbsenceHit } from "@/lib/utils/availability";
+import { getSessionDate, toISODate } from "@/lib/utils/date";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -47,9 +49,11 @@ export interface SessionSaveData {
 interface Props {
   session: TrainingSession | null;
   defaultDay: number;
+  weekStart: string; // ISO Monday — used to compute the session date for absence lookup
   locations: Location[];
   trainers: Profile[];
   virtualTrainers: VirtualTrainer[];
+  availabilityWindows: TrainerAvailability[];
   topics: ClubTopic[];
   sessionTypes: ClubSessionType[];
   teilnehmerGroups?: TeilnehmerGroup[];
@@ -213,6 +217,7 @@ function UnifiedTrainerSelect({
   onAdd,
   onRemove,
   emptyHref,
+  absences,
 }: {
   trainers: Profile[];
   virtualTrainers: VirtualTrainer[];
@@ -220,6 +225,8 @@ function UnifiedTrainerSelect({
   onAdd: (id: string) => void;
   onRemove: (id: string) => void;
   emptyHref?: string;
+  /** Trainer id → active absence for the session's date. */
+  absences: Record<string, AbsenceHit>;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -286,16 +293,26 @@ function UnifiedTrainerSelect({
 
           {open && available.length > 0 && (
             <div className="absolute z-50 mt-1 w-full rounded-xl border border-border bg-popover shadow-md overflow-hidden">
-              {available.map((opt) => (
-                <button
-                  key={opt.id}
-                  type="button"
-                  onClick={() => { onAdd(opt.id); setOpen(false); }}
-                  className="w-full text-left px-3 py-2 text-sm hover:bg-secondary transition-colors"
-                >
-                  {opt.label}
-                </button>
-              ))}
+              {available.map((opt) => {
+                const hit = absences[opt.id];
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => { onAdd(opt.id); setOpen(false); }}
+                    className={`w-full text-left px-3 py-2 text-sm hover:bg-secondary transition-colors flex items-center justify-between gap-2 ${
+                      hit ? "text-muted-foreground" : ""
+                    }`}
+                  >
+                    <span>{opt.label}</span>
+                    {hit && (
+                      <span className="text-[11px] text-amber-600 dark:text-amber-400 shrink-0">
+                        {absenceSuffix(hit)}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
@@ -304,28 +321,35 @@ function UnifiedTrainerSelect({
       {/* Selected trainer chips — shown below the trigger */}
       {selected.length > 0 && (
         <div className="flex flex-wrap gap-1.5 pt-0.5">
-          {selected.map((id) => (
-            <span
-              key={id}
-              className={`inline-flex items-center gap-1 h-6 pl-2.5 pr-1.5 rounded-full text-xs font-medium border ${
-                vtIds.has(id)
-                  ? "bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 border-indigo-500/20"
-                  : "bg-primary/10 text-primary border-primary/20"
-              }`}
-            >
-              {labelFor(id)}
-              <button
-                type="button"
-                onClick={() => onRemove(id)}
-                className="flex items-center justify-center w-3.5 h-3.5 rounded-full hover:bg-black/10 transition-colors"
-                aria-label={`${labelFor(id)} entfernen`}
+          {selected.map((id) => {
+            const hit = absences[id];
+            return (
+              <span
+                key={id}
+                className={`inline-flex items-center gap-1 h-6 pl-2.5 pr-1.5 rounded-full text-xs font-medium border ${
+                  hit
+                    ? "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30"
+                    : vtIds.has(id)
+                    ? "bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 border-indigo-500/20"
+                    : "bg-primary/10 text-primary border-primary/20"
+                }`}
+                title={hit ? absenceSuffix(hit) : undefined}
               >
-                <svg width="7" height="7" viewBox="0 0 8 8" fill="none">
-                  <path d="M1 1l6 6M7 1L1 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                </svg>
-              </button>
-            </span>
-          ))}
+                {labelFor(id)}
+                {hit && <span className="text-[10px] opacity-75">· {absenceSuffix(hit)}</span>}
+                <button
+                  type="button"
+                  onClick={() => onRemove(id)}
+                  className="flex items-center justify-center w-3.5 h-3.5 rounded-full hover:bg-black/10 transition-colors"
+                  aria-label={`${labelFor(id)} entfernen`}
+                >
+                  <svg width="7" height="7" viewBox="0 0 8 8" fill="none">
+                    <path d="M1 1l6 6M7 1L1 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                  </svg>
+                </button>
+              </span>
+            );
+          })}
         </div>
       )}
     </div>
@@ -552,9 +576,11 @@ function GroupMultiSelect({
 export function SessionEditModal({
   session,
   defaultDay,
+  weekStart,
   locations,
   trainers,
   virtualTrainers,
+  availabilityWindows,
   topics,
   sessionTypes,
   teilnehmerGroups = [],
@@ -575,6 +601,14 @@ export function SessionEditModal({
   const [pendingData, setPendingData] = useState<SessionSaveData | null>(null);
   const [dayOfWeek, setDayOfWeek] = useState<number>(session?.day_of_week ?? defaultDay);
   const [locationId, setLocationId] = useState<string>(session?.location_id ?? "none");
+
+  // Compute absences for the session's date so unavailable trainers are greyed
+  // out in the picker. Recomputes when the user changes the weekday.
+  const bucketedAvailability = useMemo(() => bucketWindows(availabilityWindows), [availabilityWindows]);
+  const sessionAbsences = useMemo(() => {
+    const iso = toISODate(getSessionDate(weekStart, dayOfWeek));
+    return absencesOn(bucketedAvailability, iso);
+  }, [bucketedAvailability, weekStart, dayOfWeek]);
 
   const initTrainers: string[] = session?.session_trainers?.length
     ? session.session_trainers.filter((st) => st.user_id).map((st) => st.user_id!)
@@ -833,6 +867,7 @@ export function SessionEditModal({
             onAdd={(id) => setSelectedAllTrainerIds((prev) => prev.includes(id) ? prev : [...prev, id])}
             onRemove={(id) => setSelectedAllTrainerIds((prev) => prev.filter((x) => x !== id))}
             emptyHref={mitgliederHref}
+            absences={sessionAbsences}
           />
 
           {/* Expected groups */}

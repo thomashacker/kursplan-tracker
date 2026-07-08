@@ -4,7 +4,7 @@ import { useState, useTransition, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { motion, useReducedMotion } from "framer-motion";
-import type { Club, TrainingWeek, TrainingSession, Location, Profile, ClubTopic, ClubSessionType, SessionColor, VirtualTrainer, TeilnehmerGroup } from "@/types";
+import type { Club, TrainingWeek, TrainingSession, Location, Profile, ClubTopic, ClubSessionType, SessionColor, VirtualTrainer, TeilnehmerGroup, TrainerAvailability } from "@/types";
 import { DAY_NAMES, SESSION_COLORS } from "@/types";
 import { formatTime, formatWeekRange, offsetWeek, getCurrentMonday, toISODate } from "@/lib/utils/date";
 import { createClient } from "@/lib/supabase/client";
@@ -812,6 +812,7 @@ export function WeeklyPlanEditor({
   const [publishModalOpen, setPublishModalOpen] = useState(false);
   const [teilnehmerGroups, setTeilnehmerGroups] = useState<TeilnehmerGroup[]>([]);
   const [groupMemberCounts, setGroupMemberCounts] = useState<Record<string, number>>({});
+  const [availabilityWindows, setAvailabilityWindows] = useState<TrainerAvailability[]>([]);
   const [attendanceSummaries, setAttendanceSummaries] = useState<Map<string, AttendanceSummary>>(new Map());
   const [attendanceSummaryRevision, setAttendanceSummaryRevision] = useState(0);
   const [noteText, setNoteText] = useState(initialWeek?.notes ?? "");
@@ -838,6 +839,26 @@ export function WeeklyPlanEditor({
       }
     });
   }, [club.id]);
+
+  // Fetch trainer absence windows for this club (small table, current + future
+  // only). Refetched when the week window changes so we always cover the
+  // dates the picker will ask about.
+  useEffect(() => {
+    const supabase = createClient();
+    // Start from the earlier of "today" and the currently-visible week so
+    // navigating backwards still shows the correct absence state.
+    const fromIso = weekStart < getCurrentMonday() ? weekStart : getCurrentMonday();
+    supabase
+      .from("trainer_availability")
+      .select("*")
+      .eq("club_id", club.id)
+      .gte("end_date", fromIso)
+      .returns<TrainerAvailability[]>()
+      .then(({ data }) => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setAvailabilityWindows(data ?? []);
+      });
+  }, [club.id, weekStart]);
 
   // Fetch attendance summaries for all sessions in the current week
   useEffect(() => {
@@ -1927,9 +1948,11 @@ export function WeeklyPlanEditor({
         <SessionEditModal
           session={editingSession === "new" ? null : editingSession}
           defaultDay={editingSession === "new" ? newSessionDay : editingSession.day_of_week}
+          weekStart={weekStart}
           locations={locations}
           trainers={trainers}
           virtualTrainers={virtualTrainers}
+          availabilityWindows={availabilityWindows}
           topics={topics}
           sessionTypes={sessionTypes}
           teilnehmerGroups={teilnehmerGroups}
