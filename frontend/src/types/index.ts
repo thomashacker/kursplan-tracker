@@ -236,6 +236,30 @@ export interface TeilnehmerQRPayload {
   name: string; // display name (for add-by-scan flow)
 }
 
+// ── Trainer availability (absence windows) ───────────────────────────────────
+
+export type AbsenceReason = "sick" | "vacation" | "other";
+
+export const ABSENCE_REASON_LABELS: Record<AbsenceReason, string> = {
+  sick: "Krank",
+  vacation: "Urlaub",
+  other: "Abwesend",
+};
+
+export interface TrainerAvailability {
+  id: string;
+  club_id: string;
+  user_id: string | null;
+  virtual_trainer_id: string | null;
+  start_date: string; // YYYY-MM-DD, inclusive
+  end_date: string;   // YYYY-MM-DD, inclusive
+  reason: AbsenceReason;
+  note: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export const SUGGESTED_TAGS = [
   "Technik",
   "Taktik",
