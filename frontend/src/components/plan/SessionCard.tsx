@@ -23,9 +23,10 @@ interface Props {
 
 export function SessionCard({ session, trainers, virtualTrainers, topics, sessionTypes, canEdit, isToday, attendanceSummary, onEdit, onDelete, onAttendance }: Props) {
   const cancelled = session.is_cancelled;
+  const isEvent = session.kind === "event";
   const colorKey = (session.color ?? "neutral") as SessionColor;
   const colorCfg = SESSION_COLORS[colorKey] ?? SESSION_COLORS.neutral;
-  const hasColor = colorKey !== "neutral" && !cancelled;
+  const hasColor = colorKey !== "neutral" && !cancelled && !isEvent;
 
   const trainerProfiles: Profile[] = session.session_trainers?.length
     ? session.session_trainers.filter((st) => st.user_id).map((st) => trainers.find((t) => t.id === st.user_id)).filter((t): t is Profile => Boolean(t))
@@ -44,12 +45,22 @@ export function SessionCard({ session, trainers, virtualTrainers, topics, sessio
       className={`relative rounded-xl border p-3 text-sm group transition-shadow hover:shadow-sm ${
         cancelled
           ? "border-destructive/30 bg-destructive/5 opacity-75"
+          : isEvent
+          ? "border-amber-500/40 bg-gradient-to-br from-amber-500/[0.06] via-orange-500/[0.03] to-transparent"
           : isToday && !hasColor
           ? "border-primary/40 bg-primary/5 bg-card"
           : "border-border bg-card"
       }`}
       style={hasColor ? { backgroundColor: colorCfg.bg, borderColor: colorCfg.border } : undefined}
     >
+      {/* Event badge */}
+      {isEvent && !cancelled && (
+        <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-amber-700 dark:text-amber-400 mb-1">
+          <span aria-hidden>✨</span>
+          Event
+        </span>
+      )}
+
       {/* Recurring badge */}
       {session.template_id && !session.is_modified && !cancelled && (
         <span className="inline-flex items-center gap-1 text-[10px] font-medium text-primary/70 mb-1">
@@ -95,8 +106,19 @@ export function SessionCard({ session, trainers, virtualTrainers, topics, sessio
         {formatTime(session.time_start)} – {formatTime(session.time_end)}
       </div>
 
+      {/* Event title — replaces the topic/type chip stack for events */}
+      {isEvent && session.title && (
+        <p
+          className={`text-sm font-bold leading-tight mb-1 truncate ${cancelled ? "line-through text-muted-foreground/60" : "text-foreground"}`}
+          style={{ fontFamily: "var(--font-syne, system-ui)" }}
+          title={session.title}
+        >
+          {session.title}
+        </p>
+      )}
+
       {/* Topic chips — prominent */}
-      {topicNames.length > 0 && (
+      {!isEvent && topicNames.length > 0 && (
         <div className="flex flex-wrap gap-1 mb-1.5">
           {topicNames.map((name) => {
             const topicColor = topics.find((t) => t.name === name)?.color as SessionColor | null | undefined;
@@ -121,7 +143,7 @@ export function SessionCard({ session, trainers, virtualTrainers, topics, sessio
       )}
 
       {/* Type chips — subtle */}
-      {typeNames.length > 0 && (
+      {!isEvent && typeNames.length > 0 && (
         <div className="flex flex-wrap gap-1 mb-1.5">
           {typeNames.map((name) => {
             const typeColor = sessionTypes.find((t) => t.name === name)?.color as SessionColor | null | undefined;
@@ -141,8 +163,8 @@ export function SessionCard({ session, trainers, virtualTrainers, topics, sessio
         </div>
       )}
 
-      {/* Empty state when no types/topics */}
-      {typeNames.length === 0 && topicNames.length === 0 && (
+      {/* Empty state when no types/topics — trainings only. Events show title. */}
+      {!isEvent && typeNames.length === 0 && topicNames.length === 0 && (
         <p className="text-xs text-muted-foreground/60 mb-1.5 italic">Kein Typ / Thema</p>
       )}
 

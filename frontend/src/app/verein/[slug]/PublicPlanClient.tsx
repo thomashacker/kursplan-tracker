@@ -6,12 +6,21 @@ import { formatTime } from "@/lib/utils/date";
 import { getDayLayout } from "@/lib/dayLayout";
 import type { SessionColor } from "@/types";
 import { SESSION_COLORS } from "@/types";
+import { EventsTickets } from "./EventsTickets";
+import { EventModal } from "./EventModal";
 
 // ── Types ─────────────────────────────────────────────────────
 
 export type TrainerInfo = {
   name: string;
   avatarUrl: string | null;
+};
+
+export type PublicMedia = {
+  id: string;
+  kind: "image" | "pdf" | "link";
+  url: string;
+  caption: string | null;
 };
 
 export type PublicSession = {
@@ -32,6 +41,12 @@ export type PublicSession = {
   sortOrder?: number | null;
   /** Expected teilnehmer groups — only populated when the public toggle is on. */
   groups?: { name: string; color: string | null }[];
+  /** kind + pin flags — events are always visible even under active filters. */
+  kind: "training" | "event";
+  isPinned: boolean;
+  title: string | null;                   // required when kind === "event"
+  metadata: Record<string, string>;       // capacity, signup_url, cost, …
+  media: PublicMedia[];
 };
 
 export type FilterOptions = {
@@ -129,15 +144,16 @@ function SessionRow({
   onDayClick?: (dateKey: string) => void;
 }) {
   const cancelled = s.isCancelled;
+  const isEvent = s.kind === "event";
   const colorKey = (s.color ?? "neutral") as SessionColor;
   const colorCfg = SESSION_COLORS[colorKey] ?? SESSION_COLORS.neutral;
   const hasColor = colorKey !== "neutral" && !cancelled;
   return (
     <div
-      className={`flex items-stretch transition-colors ${cancelled ? "bg-destructive/3" : !hasColor ? "hover:bg-secondary/20" : ""}`}
-      style={hasColor ? { backgroundColor: colorCfg.bg } : undefined}
+      className={`flex items-stretch transition-colors ${cancelled ? "bg-destructive/3" : !hasColor ? "hover:bg-secondary/20" : ""} ${isEvent && !cancelled ? "bg-amber-500/[0.05]" : ""}`}
+      style={hasColor && !isEvent ? { backgroundColor: colorCfg.bg } : undefined}
     >
-      <div className="w-1.5 shrink-0" style={{ backgroundColor: hasColor ? colorCfg.border : "transparent" }} />
+      <div className="w-1.5 shrink-0" style={{ backgroundColor: isEvent && !cancelled ? "rgb(245 158 11 / 0.7)" : hasColor ? colorCfg.border : "transparent" }} />
       <div className="flex-1 px-5 py-4 flex items-start gap-4">
         <div className="w-24 shrink-0">
           <p className={`text-xs font-mono ${cancelled ? "text-muted-foreground/50 line-through" : "text-muted-foreground"}`}>
@@ -145,7 +161,16 @@ function SessionRow({
           </p>
         </div>
         <div className="flex-1 min-w-0">
+          {isEvent && s.title && (
+            <p className={`text-sm font-bold mb-1 leading-tight ${cancelled ? "text-muted-foreground/50 line-through" : "text-foreground"}`}
+               style={{ fontFamily: "var(--font-syne, system-ui)" }}>
+              {s.title}
+            </p>
+          )}
           <div className="flex flex-wrap gap-1 mb-1">
+            {isEvent && (
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30 uppercase tracking-wide">Event</span>
+            )}
             {cancelled && (
               <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-destructive/10 text-destructive border border-destructive/20 uppercase tracking-wide">Abgesagt</span>
             )}
@@ -231,6 +256,42 @@ function SessionRow({
           )}
           {s.description && (
             <p className={`text-xs mt-1.5 italic leading-relaxed ${cancelled ? "text-muted-foreground/40 line-through" : "text-muted-foreground"}`}>{s.description}</p>
+          )}
+          {isEvent && Object.keys(s.metadata).length > 0 && !cancelled && (
+            <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1.5 text-[11px] text-muted-foreground">
+              {s.metadata.capacity && <span>Kapazität: <span className="font-medium text-foreground">{s.metadata.capacity}</span></span>}
+              {s.metadata.cost && <span>Kosten: <span className="font-medium text-foreground">{s.metadata.cost}</span></span>}
+              {s.metadata.age_range && <span>Alter: <span className="font-medium text-foreground">{s.metadata.age_range}</span></span>}
+              {s.metadata.contact_name && <span>Ansprechpartner: <span className="font-medium text-foreground">{s.metadata.contact_name}</span></span>}
+              {s.metadata.contact_email && <a href={`mailto:${s.metadata.contact_email}`} className="text-primary hover:underline">{s.metadata.contact_email}</a>}
+              {s.metadata.signup_url && (
+                <a href={s.metadata.signup_url} target="_blank" rel="noopener noreferrer" className="font-medium text-primary hover:underline">
+                  Anmeldung ›
+                </a>
+              )}
+            </div>
+          )}
+          {s.media.length > 0 && !cancelled && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {s.media.map((m) => {
+                if (m.kind === "image") {
+                  return (
+                    <a key={m.id} href={m.url} target="_blank" rel="noopener noreferrer" className="block h-16 w-16 rounded-lg overflow-hidden border border-border hover:opacity-90 transition-opacity">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={m.url} alt={m.caption ?? ""} className="w-full h-full object-cover" />
+                    </a>
+                  );
+                }
+                const label = m.caption ?? (m.kind === "pdf" ? "PDF" : "Link");
+                return (
+                  <a key={m.id} href={m.url} target="_blank" rel="noopener noreferrer"
+                     className="inline-flex items-center gap-1 h-7 px-2 rounded-md border border-border bg-background text-[11px] font-medium hover:bg-secondary transition-colors">
+                    <span>{m.kind === "pdf" ? "📄" : "🔗"}</span>
+                    <span className="max-w-[10rem] truncate">{label}</span>
+                  </a>
+                );
+              })}
+            </div>
           )}
         </div>
         {onDayClick && (
@@ -496,6 +557,7 @@ export default function PublicPlanClient({
 }) {
   const [viewMode, setViewMode]         = useState<"list" | "day">("list");
   const [selectedDayKey, setSelectedDayKey] = useState<string | null>(null);
+  const [openEvent, setOpenEvent] = useState<PublicSession | null>(null);
   const [filterOpen, setFilterOpen]     = useState(false);
   const [activeTypes, setActiveTypes]   = useState<Set<string>>(new Set());
   const [activeTopics, setActiveTopics] = useState<Set<string>>(new Set());
@@ -520,6 +582,9 @@ export default function PublicPlanClient({
   const filtered = useMemo(() => {
     if (activeCount === 0) return sessions;
     return sessions.filter((s) => {
+      // Events and pinned trainings are always visible — they bypass filters
+      // because the club marked them as importantly public.
+      if (s.kind === "event" || s.isPinned) return true;
       if (activeTypes.size > 0    && !s.sessionTypes.some((t) => activeTypes.has(t)))    return false;
       if (activeTopics.size > 0   && !s.topics.some((t) => activeTopics.has(t)))         return false;
       if (activeTrainers.size > 0 && !s.trainerNames.some((t) => activeTrainers.has(t))) return false;
@@ -570,6 +635,12 @@ export default function PublicPlanClient({
     }
     return map;
   }, [upcoming]);
+
+  // Upcoming events, sorted by date. Rendered as ticket stubs mid-page.
+  const eventsUpcoming = useMemo(
+    () => filtered.filter((s) => s.kind === "event" && !s.isCancelled),
+    [filtered],
+  );
 
   return (
     <main className="container max-w-2xl mx-auto px-4 py-8 space-y-6">
@@ -676,6 +747,12 @@ export default function PublicPlanClient({
           )}
         </div>
       )}
+
+      {/* ── Events (ticket stubs) — sits between filters and the schedule ── */}
+      {eventsUpcoming.length > 0 && (
+        <EventsTickets events={eventsUpcoming} onSelect={setOpenEvent} />
+      )}
+      <EventModal event={openEvent} onClose={() => setOpenEvent(null)} />
 
       {/* ── Day view ─────────────────────────────────────────── */}
       {viewMode === "day" && activeDayKey && (

@@ -17,6 +17,11 @@ function makeSession(overrides: Partial<PublicSession> = {}): PublicSession {
     trainerNames: [],
     trainers: [],
     color: null,
+    kind: "training",
+    isPinned: false,
+    title: null,
+    metadata: {},
+    media: [],
     ...overrides,
   };
 }
@@ -31,6 +36,7 @@ function applyFilters(
   const activeCount = activeTypes.size + activeTopics.size + activeTrainers.size + activeLocations.size;
   if (activeCount === 0) return sessions;
   return sessions.filter((s) => {
+    if (s.kind === "event" || s.isPinned) return true;
     if (activeTypes.size > 0    && !s.sessionTypes.some((t) => activeTypes.has(t)))    return false;
     if (activeTopics.size > 0   && !s.topics.some((t) => activeTopics.has(t)))         return false;
     if (activeTrainers.size > 0 && !s.trainerNames.some((t) => activeTrainers.has(t))) return false;
@@ -91,5 +97,24 @@ describe("filter logic", () => {
   it("session with no location is excluded when location filter active", () => {
     const result = applyFilters(sessions, new Set(), new Set(), new Set(), new Set(["Halle A"]));
     expect(result.find((s) => s.id === "3")).toBeUndefined();
+  });
+
+  it("event bypasses filters — always visible", () => {
+    const withEvent: PublicSession[] = [
+      ...sessions,
+      makeSession({ id: "4", kind: "event", title: "Turnier", sessionTypes: [], topics: [] }),
+    ];
+    // Filter that would normally exclude the event (no matching topic/type)
+    const result = applyFilters(withEvent, new Set(["Kraft"]), new Set(), new Set(), new Set());
+    expect(result.some((s) => s.id === "4")).toBe(true);
+  });
+
+  it("pinned training bypasses filters — always visible", () => {
+    const withPinned: PublicSession[] = [
+      ...sessions,
+      makeSession({ id: "5", isPinned: true, sessionTypes: ["Yoga"], topics: [] }),
+    ];
+    const result = applyFilters(withPinned, new Set(["Kraft"]), new Set(), new Set(), new Set());
+    expect(result.some((s) => s.id === "5")).toBe(true);
   });
 });

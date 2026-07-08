@@ -65,6 +65,7 @@ function weekDayDate(weekStart: string, dayIndex: number): string {
 }
 
 function sessionLabel(s: TrainingSession): string {
+  if (s.kind === "event") return s.title?.trim() || "Event";
   return [...(s.session_types ?? []), ...(s.topics ?? [])].join(" · ") || "Training";
 }
 
@@ -1229,6 +1230,11 @@ export function WeeklyPlanEditor({
             trainer_id: trainer_ids[0] ?? null, is_cancelled: data.is_cancelled,
             color: data.color, sort_order: data.sort_order, template_id: null, is_modified: false,
             probetraining_count: 0,
+            kind: data.kind,
+            title: data.title,
+            is_pinned: data.is_pinned,
+            event_date: data.event_date,
+            metadata: data.metadata,
             session_trainers: [
               ...trainer_ids.map((uid) => ({ session_id: created.id, user_id: uid, virtual_trainer_id: null })),
               ...virtual_trainer_ids.map((vid) => ({ session_id: created.id, user_id: null, virtual_trainer_id: vid })),
@@ -1949,6 +1955,7 @@ export function WeeklyPlanEditor({
           session={editingSession === "new" ? null : editingSession}
           defaultDay={editingSession === "new" ? newSessionDay : editingSession.day_of_week}
           weekStart={weekStart}
+          clubId={club.id}
           locations={locations}
           trainers={trainers}
           virtualTrainers={virtualTrainers}
@@ -1967,6 +1974,7 @@ export function WeeklyPlanEditor({
         <AttendanceModal
           session={attendanceSession}
           clubId={club.id}
+          weekStart={weekStart}
           canEdit={canEdit}
           onClose={() => { setAttendanceSession(null); setAttendanceSummaryRevision((r) => r + 1); }}
           onLocalSessionPatch={(patch) => {

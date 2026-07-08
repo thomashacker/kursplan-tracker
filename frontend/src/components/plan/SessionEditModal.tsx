@@ -2,11 +2,12 @@
 
 import { useState, useRef, useEffect, useMemo } from "react";
 import { usePathname } from "next/navigation";
-import type { TrainingSession, Location, Profile, ClubTopic, ClubSessionType, SessionColor, VirtualTrainer, TeilnehmerGroup, TrainerAvailability } from "@/types";
+import type { TrainingSession, Location, Profile, ClubTopic, ClubSessionType, SessionColor, VirtualTrainer, TeilnehmerGroup, TrainerAvailability, SessionKind } from "@/types";
 import { createClient } from "@/lib/supabase/client";
-import { DAY_NAMES, SESSION_COLORS } from "@/types";
+import { DAY_NAMES, SESSION_COLORS, EVENT_METADATA_FIELDS } from "@/types";
 import { absencesOn, absenceSuffix, bucketWindows, type AbsenceHit } from "@/lib/utils/availability";
 import { getSessionDate, toISODate } from "@/lib/utils/date";
+import { SessionMediaEditor } from "./SessionMediaEditor";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -44,12 +45,19 @@ export interface SessionSaveData {
   color: SessionColor | null;
   sort_order: number | null;
   expected_group_ids: string[];
+  // ── Event / pin support ─────────────────────────
+  kind: SessionKind;
+  title: string | null;
+  is_pinned: boolean;
+  event_date: string | null;
+  metadata: Record<string, unknown>;
 }
 
 interface Props {
   session: TrainingSession | null;
   defaultDay: number;
   weekStart: string; // ISO Monday — used to compute the session date for absence lookup
+  clubId: string;    // for media uploads to session-media bucket
   locations: Location[];
   trainers: Profile[];
   virtualTrainers: VirtualTrainer[];
@@ -577,6 +585,7 @@ export function SessionEditModal({
   session,
   defaultDay,
   weekStart,
+  clubId,
   locations,
   trainers,
   virtualTrainers,
@@ -602,13 +611,7 @@ export function SessionEditModal({
   const [dayOfWeek, setDayOfWeek] = useState<number>(session?.day_of_week ?? defaultDay);
   const [locationId, setLocationId] = useState<string>(session?.location_id ?? "none");
 
-  // Compute absences for the session's date so unavailable trainers are greyed
-  // out in the picker. Recomputes when the user changes the weekday.
   const bucketedAvailability = useMemo(() => bucketWindows(availabilityWindows), [availabilityWindows]);
-  const sessionAbsences = useMemo(() => {
-    const iso = toISODate(getSessionDate(weekStart, dayOfWeek));
-    return absencesOn(bucketedAvailability, iso);
-  }, [bucketedAvailability, weekStart, dayOfWeek]);
 
   const initTrainers: string[] = session?.session_trainers?.length
     ? session.session_trainers.filter((st) => st.user_id).map((st) => st.user_id!)
@@ -635,6 +638,28 @@ export function SessionEditModal({
 
   // Sort order (display position in day view)
 
+  // Event / kind support. Default event date = the day the user clicked, not
+  // the week's Monday — matches expectation "I clicked Friday, so the event
+  // starts on Friday".
+  const clickedDayIso = toISODate(getSessionDate(weekStart, session?.day_of_week ?? defaultDay));
+  const [kind, setKind] = useState<SessionKind>(session?.kind ?? "training");
+  const [eventTitle, setEventTitle] = useState<string>(session?.title ?? "");
+  const [eventDate, setEventDate] = useState<string>(session?.event_date ?? clickedDayIso);
+  const [isPinned, setIsPinned] = useState<boolean>(session?.is_pinned ?? false);
+  const initialMetadata = (session?.metadata ?? {}) as Record<string, string>;
+  const [eventMeta, setEventMeta] = useState<Record<string, string>>(initialMetadata);
+  const isEvent = kind === "event";
+
+  // Compute absences for the session's date so unavailable trainers are greyed
+  // out in the picker. For events we use event_date directly; trainings derive
+  // the date from week_start + day_of_week.
+  const sessionAbsences = useMemo(() => {
+    const iso = isEvent && eventDate
+      ? eventDate
+      : toISODate(getSessionDate(weekStart, dayOfWeek));
+    return absencesOn(bucketedAvailability, iso);
+  }, [bucketedAvailability, weekStart, dayOfWeek, isEvent, eventDate]);
+
   // Expected groups
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
   useEffect(() => {
@@ -655,24 +680,48 @@ export function SessionEditModal({
     e.preventDefault();
     const form = new FormData(e.currentTarget);
 
+    if (isEvent && !eventTitle.trim()) {
+      // form field is `required`, but guard defensively
+      return;
+    }
+
     const vtIdSet = new Set(virtualTrainers.map((vt) => vt.id));
+    // Prune empty metadata strings; keep the jsonb tidy.
+    const cleanMeta: Record<string, string> = {};
+    for (const [k, v] of Object.entries(eventMeta)) {
+      const s = (v ?? "").trim();
+      if (s) cleanMeta[k] = s;
+    }
+    // For events, day_of_week must match event_date so the internal week
+    // grid displays it on the correct weekday. JS getDay(): 0=Sunday…6=Saturday;
+    // our convention is 0=Monday…6=Sunday.
+    let resolvedDow = dayOfWeek;
+    if (isEvent && eventDate) {
+      const js = new Date(eventDate + "T00:00:00").getDay();
+      resolvedDow = js === 0 ? 6 : js - 1;
+    }
     const data: SessionSaveData = {
-      day_of_week: dayOfWeek,
+      day_of_week: resolvedDow,
       time_start: form.get("time_start") as string,
       time_end: form.get("time_end") as string,
-      topics: selectedTopics,
-      session_types: selectedTypes,
+      topics: isEvent ? [] : selectedTopics,
+      session_types: isEvent ? [] : selectedTypes,
       description: ((form.get("description") as string) ?? "").trim() || null,
       location_id: locationId === "none" ? null : locationId,
       trainer_ids: selectedAllTrainerIds.filter((id) => !vtIdSet.has(id)),
       virtual_trainer_ids: selectedAllTrainerIds.filter((id) => vtIdSet.has(id)),
       is_cancelled: isCancelled,
-      is_recurring: (isNew || !isRecurring) ? makeRecurring : false,
+      is_recurring: !isEvent && ((isNew || !isRecurring) ? makeRecurring : false),
       edit_scope: editScope,
       auto_extend: autoExtend,
-      color: selectedColor,
+      color: isEvent ? null : selectedColor,
       sort_order: session?.sort_order ?? null,
       expected_group_ids: selectedGroupIds,
+      kind,
+      title: isEvent ? eventTitle.trim() : (eventTitle.trim() || null),
+      is_pinned: isEvent ? true : isPinned,
+      event_date: isEvent ? eventDate : null,
+      metadata: cleanMeta,
     };
 
     // Require extra confirmation when overwriting all future recurring sessions
@@ -751,7 +800,90 @@ export function SessionEditModal({
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4 pt-1">
-          {/* Color picker */}
+          {/* Kind toggle: Training vs Event */}
+          <div className="flex gap-1 p-1 rounded-xl bg-secondary/50">
+            {(["training", "event"] as SessionKind[]).map((k) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setKind(k)}
+                className={`flex-1 py-2 rounded-lg text-xs font-semibold transition-colors ${
+                  kind === k ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {k === "training" ? "Training" : "Event"}
+              </button>
+            ))}
+          </div>
+
+          {/* Event-only fields */}
+          {isEvent && (
+            <div className="space-y-3 rounded-xl border border-amber-500/30 bg-amber-500/[0.03] p-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="event-title" className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                  Titel <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="event-title"
+                  value={eventTitle}
+                  onChange={(e) => setEventTitle(e.target.value)}
+                  placeholder="z.B. Vereinsturnier, Familientag…"
+                  className="h-10 rounded-xl"
+                  required
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="event-date" className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Datum</Label>
+                <Input
+                  id="event-date"
+                  type="date"
+                  value={eventDate}
+                  onChange={(e) => setEventDate(e.target.value)}
+                  className="h-10 rounded-xl"
+                  required
+                />
+                <p className="text-[11px] text-muted-foreground">Event ist immer öffentlich sichtbar, unabhängig von Filtern.</p>
+              </div>
+              {/* Ad-hoc metadata fields — extending the list requires ONE line in types/index.ts */}
+              <div className="grid grid-cols-2 gap-2">
+                {EVENT_METADATA_FIELDS.map((f) => (
+                  <div key={f.key} className="space-y-1">
+                    <Label htmlFor={`meta-${f.key}`} className="text-[11px] text-muted-foreground">{f.label}</Label>
+                    <Input
+                      id={`meta-${f.key}`}
+                      type={f.type}
+                      value={eventMeta[f.key] ?? ""}
+                      onChange={(e) => setEventMeta((prev) => ({ ...prev, [f.key]: e.target.value }))}
+                      placeholder={f.placeholder}
+                      className="h-9 rounded-lg text-xs"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Pin toggle — trainings only. Events are already always visible. */}
+          {!isEvent && !isNew && (
+            <label className="flex items-center justify-between rounded-xl border border-input px-3 py-2.5 cursor-pointer hover:bg-secondary/50 transition-colors">
+              <div>
+                <p className="text-sm font-medium">Immer öffentlich sichtbar</p>
+                <p className="text-xs text-muted-foreground">Umgeht Filter auf der öffentlichen Seite.</p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={isPinned}
+                onClick={() => setIsPinned((v) => !v)}
+                className={`relative shrink-0 h-5 w-9 rounded-full border-2 transition-colors ${isPinned ? "bg-primary border-primary" : "bg-input border-transparent"}`}
+              >
+                <span className={`block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${isPinned ? "translate-x-4" : "translate-x-0.5"}`} />
+              </button>
+            </label>
+          )}
+
+          {/* Color picker — hidden for events (they own their amber accent). */}
+          {!isEvent && (
           <div className="flex items-center justify-center gap-2">
             {(Object.entries(SESSION_COLORS) as [SessionColor, typeof SESSION_COLORS[SessionColor]][]).map(([key, cfg]) => {
               const active = (selectedColor ?? "neutral") === key;
@@ -775,22 +907,26 @@ export function SessionEditModal({
               );
             })}
           </div>
+          )}
 
-          {/* Row: Day + Time */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            <div className="space-y-1.5 col-span-2 sm:col-span-1">
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Wochentag</Label>
-              <Select value={String(dayOfWeek)} onValueChange={(v) => v !== null && setDayOfWeek(Number(v))}>
-                <SelectTrigger className="h-10 w-full rounded-xl">
-                  <span className="flex-1 text-left text-sm truncate">{DAY_NAMES[dayOfWeek]}</span>
-                </SelectTrigger>
-                <SelectContent>
-                  {DAY_NAMES.map((name, i) => (
-                    <SelectItem key={i} value={String(i)}>{name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+          {/* Row: Day + Time — weekday picker hidden in event mode
+              (event_date up top is authoritative). */}
+          <div className={`grid gap-3 ${isEvent ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-3"}`}>
+            {!isEvent && (
+              <div className="space-y-1.5 col-span-2 sm:col-span-1">
+                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Wochentag</Label>
+                <Select value={String(dayOfWeek)} onValueChange={(v) => v !== null && setDayOfWeek(Number(v))}>
+                  <SelectTrigger className="h-10 w-full rounded-xl">
+                    <span className="flex-1 text-left text-sm truncate">{DAY_NAMES[dayOfWeek]}</span>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DAY_NAMES.map((name, i) => (
+                      <SelectItem key={i} value={String(i)}>{name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label htmlFor="time_start" className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Von</Label>
               <Input id="time_start" name="time_start" type="time" required defaultValue={session?.time_start?.slice(0, 5) ?? "18:00"} className="h-10 rounded-xl" />
@@ -801,31 +937,34 @@ export function SessionEditModal({
             </div>
           </div>
 
-          {/* Typ */}
-          <MultiTagSelect
-            label="Typ"
-            options={sessionTypes.map((t) => ({ id: t.name, label: t.name, color: t.color }))}
-            selected={selectedTypes}
-            onAdd={(id) => add(setSelectedTypes, id)}
-            onRemove={(id) => remove(setSelectedTypes, id)}
-            placeholder="Typ hinzufügen…"
-            emptyText="Noch keine Typen – füge sie im Tab Themen & Orte hinzu."
-            emptyHref={themenHref}
-            emptyLinkLabel="Themen & Orte"
-          />
+          {/* Typ + Themen — hidden for events (their identity is the title) */}
+          {!isEvent && (
+            <>
+              <MultiTagSelect
+                label="Typ"
+                options={sessionTypes.map((t) => ({ id: t.name, label: t.name, color: t.color }))}
+                selected={selectedTypes}
+                onAdd={(id) => add(setSelectedTypes, id)}
+                onRemove={(id) => remove(setSelectedTypes, id)}
+                placeholder="Typ hinzufügen…"
+                emptyText="Noch keine Typen – füge sie im Tab Themen & Orte hinzu."
+                emptyHref={themenHref}
+                emptyLinkLabel="Themen & Orte"
+              />
 
-          {/* Themen */}
-          <MultiTagSelect
-            label="Themen"
-            options={topics.map((t) => ({ id: t.name, label: t.name, color: t.color }))}
-            selected={selectedTopics}
-            onAdd={(id) => add(setSelectedTopics, id)}
-            onRemove={(id) => remove(setSelectedTopics, id)}
-            placeholder="Thema hinzufügen…"
-            emptyText="Noch keine Themen – füge sie im Tab Themen & Orte hinzu."
-            emptyHref={themenHref}
-            emptyLinkLabel="Themen & Orte"
-          />
+              <MultiTagSelect
+                label="Themen"
+                options={topics.map((t) => ({ id: t.name, label: t.name, color: t.color }))}
+                selected={selectedTopics}
+                onAdd={(id) => add(setSelectedTopics, id)}
+                onRemove={(id) => remove(setSelectedTopics, id)}
+                placeholder="Thema hinzufügen…"
+                emptyText="Noch keine Themen – füge sie im Tab Themen & Orte hinzu."
+                emptyHref={themenHref}
+                emptyLinkLabel="Themen & Orte"
+              />
+            </>
+          )}
 
           {/* Location */}
           <div className="space-y-1.5">
@@ -888,15 +1027,28 @@ export function SessionEditModal({
             <Textarea
               id="description"
               name="description"
-              rows={2}
+              rows={isEvent ? 4 : 2}
               defaultValue={session?.description ?? ""}
-              placeholder="Weitere Details zur Trainingseinheit…"
+              placeholder={isEvent ? "Programm, Ablauf, Hinweise…" : "Weitere Details zur Trainingseinheit…"}
               className="rounded-xl text-sm resize-none"
             />
           </div>
 
-          {/* Recurring toggle — new sessions + existing non-recurring sessions */}
-          {(isNew || !isRecurring) && (
+          {/* Media — attachments for images, PDFs, links. Requires an id, so
+              only after the session exists. */}
+          {!isNew && session && (
+            <SessionMediaEditor sessionId={session.id} clubId={clubId} />
+          )}
+          {isNew && (
+            <div className="rounded-xl border border-dashed border-border bg-secondary/30 p-3">
+              <p className="text-xs text-muted-foreground">
+                Anhänge (Bilder / PDFs / Links) können nach dem Speichern hinzugefügt werden.
+              </p>
+            </div>
+          )}
+
+          {/* Recurring toggle — trainings only, new sessions + existing non-recurring sessions */}
+          {!isEvent && (isNew || !isRecurring) && (
             <div className="space-y-2">
               <ToggleRow
                 title="Wöchentlich wiederholen"
