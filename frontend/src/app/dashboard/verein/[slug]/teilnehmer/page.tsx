@@ -180,6 +180,14 @@ export default function TeilnehmerPage() {
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [deleteGroupTarget, setDeleteGroupTarget] = useState<{ id: string; name: string } | null>(null);
 
+  // Edit dialog + roster filter
+  const [editing, setEditing] = useState<Teilnehmer | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editJoined, setEditJoined] = useState("");
+  const [editNotes, setEditNotes] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
+  const [showLeft, setShowLeft] = useState(false); // hide "ausgetretene" by default
+
   // Groups
   const [newGroupName, setNewGroupName] = useState("");
   const [newGroupColor, setNewGroupColor] = useState(GROUP_COLORS[0]);
@@ -311,11 +319,54 @@ export default function TeilnehmerPage() {
     setBulkLoading(false);
   }
 
-  async function handleDelete(id: string) {
+  /** Soft-delete: mark as ausgetreten. History (attendance) is preserved. */
+  async function handleSoftDelete(id: string) {
+    if (!clubId) return;
+    const today = new Date().toISOString().slice(0, 10);
+    const { error } = await supabase.from("teilnehmer").update({ left_on: today }).eq("id", id);
+    if (error) toast.error(error.message);
+    else { toast.success("Als ausgetreten markiert."); await fetchAll(clubId); }
+  }
+
+  /** Reactivate a former member (clear left_on). */
+  async function handleReactivate(id: string) {
+    if (!clubId) return;
+    const { error } = await supabase.from("teilnehmer").update({ left_on: null }).eq("id", id);
+    if (error) toast.error(error.message);
+    else { toast.success("Wieder aktiv."); await fetchAll(clubId); }
+  }
+
+  /** Hard-delete: for genuine duplicates. Cascades to attendance rows. */
+  async function handleHardDelete(id: string) {
     if (!clubId) return;
     const { error } = await supabase.from("teilnehmer").delete().eq("id", id);
     if (error) toast.error(error.message);
-    else await fetchAll(clubId);
+    else { toast.success("Endgültig entfernt."); await fetchAll(clubId); }
+  }
+
+  function openEdit(t: Teilnehmer) {
+    setEditing(t);
+    setEditName(t.name);
+    setEditJoined(t.joined_on);
+    setEditNotes(t.notes ?? "");
+  }
+
+  async function handleSaveEdit() {
+    if (!editing || !clubId || !editName.trim()) return;
+    setEditSaving(true);
+    const { error } = await supabase
+      .from("teilnehmer")
+      .update({
+        name: editName.trim(),
+        joined_on: editJoined,
+        notes: editNotes.trim() || null,
+      })
+      .eq("id", editing.id);
+    if (error) { toast.error(error.message); setEditSaving(false); return; }
+    toast.success("Gespeichert.");
+    setEditing(null);
+    await fetchAll(clubId);
+    setEditSaving(false);
   }
 
   async function handleBulkQRDownload() {
@@ -446,6 +497,7 @@ export default function TeilnehmerPage() {
     groupsByTeilnehmer.set(gm.teilnehmer_id, list);
   }
   const filtered = teilnehmer
+    .filter((t) => showLeft || t.left_on === null)
     .filter((t) => searchLower === "" || t.name.toLowerCase().includes(searchLower))
     .filter((t) => {
       if (filterGroup === "all") return true;
@@ -458,6 +510,8 @@ export default function TeilnehmerPage() {
         ? a.name.localeCompare(b.name, "de")
         : b.name.localeCompare(a.name, "de"),
     );
+  const activeCount = teilnehmer.filter((t) => t.left_on === null).length;
+  const leftCount = teilnehmer.length - activeCount;
   const activeFilterGroup =
     filterGroup !== "all" && filterGroup !== "none"
       ? groups.find((g) => g.id === filterGroup) ?? null
@@ -476,7 +530,7 @@ export default function TeilnehmerPage() {
             Teilnehmer
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            {teilnehmer.length} {teilnehmer.length === 1 ? "Person" : "Personen"} · {groups.length} {groups.length === 1 ? "Gruppe" : "Gruppen"}
+            {activeCount} aktiv{leftCount > 0 ? ` · ${leftCount} ausgetreten` : ""} · {groups.length} {groups.length === 1 ? "Gruppe" : "Gruppen"}
           </p>
         </div>
       </div>
@@ -683,6 +737,27 @@ export default function TeilnehmerPage() {
                       <div className="h-px bg-border my-1" />
                       <button
                         type="button"
+                        onClick={() => { setToolsOpen(false); setShowLeft((v) => !v); }}
+                        className="w-full text-left text-sm px-3 py-2 hover:bg-secondary transition-colors flex items-center gap-2.5"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground">
+                          {showLeft ? (
+                            <>
+                              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                              <line x1="1" y1="1" x2="23" y2="23"/>
+                            </>
+                          ) : (
+                            <>
+                              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                              <circle cx="12" cy="12" r="3"/>
+                            </>
+                          )}
+                        </svg>
+                        {showLeft ? "Ausgetretene ausblenden" : `Ausgetretene anzeigen${leftCount > 0 ? ` (${leftCount})` : ""}`}
+                      </button>
+                      <div className="h-px bg-border my-1" />
+                      <button
+                        type="button"
                         onClick={() => { setToolsOpen(false); handleBulkQRDownload(); }}
                         disabled={teilnehmer.length === 0 || zipLoading}
                         className="w-full text-left text-sm px-3 py-2 hover:bg-secondary transition-colors flex items-center gap-2.5 disabled:opacity-40"
@@ -792,7 +867,9 @@ export default function TeilnehmerPage() {
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, x: -20 }}
                         transition={{ ...spring, delay: i < 20 ? i * 0.02 : 0 }}
-                        className="flex items-center gap-3 px-4 py-3 hover:bg-secondary/30 transition-colors border-b border-border last:border-b-0"
+                        className={`flex items-center gap-3 px-4 py-3 hover:bg-secondary/30 transition-colors border-b border-border last:border-b-0 ${
+                          t.left_on ? "opacity-60" : ""
+                        }`}
                       >
                         {/* Avatar */}
                         <div className="w-9 h-9 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold shrink-0">
@@ -801,7 +878,28 @@ export default function TeilnehmerPage() {
 
                         {/* Name + groups */}
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium leading-tight truncate">{t.name}</p>
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <p className="text-sm font-medium leading-tight truncate">{t.name}</p>
+                            {t.left_on && (
+                              <span className="shrink-0 inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-secondary text-secondary-foreground leading-none">
+                                Ausgetreten
+                              </span>
+                            )}
+                            {t.notes && (
+                              <span
+                                className="shrink-0 text-muted-foreground"
+                                title={t.notes}
+                                aria-label="Hat eine Notiz"
+                              >
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                  <polyline points="14 2 14 8 20 8"/>
+                                  <line x1="16" y1="13" x2="8" y2="13"/>
+                                  <line x1="16" y1="17" x2="8" y2="17"/>
+                                </svg>
+                              </span>
+                            )}
+                          </div>
                           {myGroups.length > 0 && (
                             <div className="flex flex-wrap gap-1 mt-1">
                               {myGroups.map((g) => (
@@ -826,16 +924,10 @@ export default function TeilnehmerPage() {
                               <path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/>
                             </svg>
                           </IconBtn>
-                          <IconBtn
-                            onClick={() => setDeleteTarget({ id: t.id, name: t.name })}
-                            title="Löschen"
-                            danger
-                          >
+                          <IconBtn onClick={() => openEdit(t)} title="Bearbeiten">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <polyline points="3 6 5 6 21 6"/>
-                              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
-                              <path d="M10 11v6M14 11v6"/>
-                              <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+                              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
                             </svg>
                           </IconBtn>
                         </div>
@@ -1323,14 +1415,109 @@ export default function TeilnehmerPage() {
         )}
       </BottomSheet>
 
-      {/* ══ CONFIRM: DELETE TEILNEHMER ══════════════════════════════════════ */}
+      {/* ══ EDIT TEILNEHMER ═════════════════════════════════════════════════ */}
+      <BottomSheet open={!!editing} onClose={() => setEditing(null)} title={editing ? `${editing.name} bearbeiten` : ""}>
+        {editing && (
+          <div className="p-5 space-y-4">
+            <div className="space-y-1.5">
+              <label htmlFor="edit-name" className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Name</label>
+              <input
+                id="edit-name"
+                type="text"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                className="w-full h-10 px-3 rounded-xl border border-input bg-background text-sm"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label htmlFor="edit-joined" className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Beitrittsdatum</label>
+              <input
+                id="edit-joined"
+                type="date"
+                value={editJoined}
+                onChange={(e) => setEditJoined(e.target.value)}
+                className="w-full h-10 px-3 rounded-xl border border-input bg-background text-sm"
+              />
+              <p className="text-xs text-muted-foreground">
+                Wird für die Statistik verwendet (Wachstum über Zeit).
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <label htmlFor="edit-notes" className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Notizen <span className="text-muted-foreground/60 font-normal normal-case">(optional)</span>
+              </label>
+              <textarea
+                id="edit-notes"
+                value={editNotes}
+                onChange={(e) => setEditNotes(e.target.value)}
+                rows={3}
+                placeholder="z.B. Verletzung, Allergien, Kontakt…"
+                className="w-full px-3 py-2 rounded-xl border border-input bg-background text-sm resize-none"
+              />
+            </div>
+
+            <div className="flex gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setEditing(null)}
+                className="h-10 px-4 rounded-xl border border-border text-sm font-medium hover:bg-secondary transition-colors"
+              >
+                Abbrechen
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveEdit}
+                disabled={editSaving || !editName.trim()}
+                className="flex-1 h-10 rounded-xl bg-primary text-primary-foreground text-sm font-semibold disabled:opacity-40 hover:opacity-90 transition-opacity"
+              >
+                {editSaving ? "Wird gespeichert…" : "Speichern"}
+              </button>
+            </div>
+
+            {/* Danger zone: soft-delete / reactivate / hard-delete */}
+            <div className="rounded-xl border-2 border-dashed border-destructive/25 bg-destructive/[0.02] p-3 space-y-2 mt-2">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-destructive/60">Gefahrenzone</p>
+
+              {editing.left_on === null ? (
+                <button
+                  type="button"
+                  onClick={() => { const id = editing.id; setEditing(null); handleSoftDelete(id); }}
+                  className="w-full h-9 rounded-lg border border-destructive/30 text-destructive text-sm font-medium hover:bg-destructive/10 transition-colors"
+                >
+                  Als ausgetreten markieren
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => { const id = editing.id; setEditing(null); handleReactivate(id); }}
+                  className="w-full h-9 rounded-lg border border-primary/30 text-primary text-sm font-medium hover:bg-primary/10 transition-colors"
+                >
+                  Wieder aktivieren (ausgetreten am {editing.left_on})
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => { if (editing) { setDeleteTarget({ id: editing.id, name: editing.name }); setEditing(null); } }}
+                className="w-full h-9 rounded-lg text-destructive text-xs font-medium hover:bg-destructive/10 transition-colors"
+              >
+                Endgültig löschen (inkl. Anwesenheitshistorie)
+              </button>
+            </div>
+          </div>
+        )}
+      </BottomSheet>
+
+      {/* ══ CONFIRM: HARD-DELETE TEILNEHMER ═════════════════════════════════ */}
       <ConfirmSheet
         open={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
-        onConfirm={() => deleteTarget && handleDelete(deleteTarget.id)}
-        title="Teilnehmer löschen"
-        description={`${deleteTarget?.name} wirklich löschen? Dies kann nicht rückgängig gemacht werden.`}
-        confirmLabel="Löschen"
+        onConfirm={() => deleteTarget && handleHardDelete(deleteTarget.id)}
+        title="Endgültig löschen"
+        description={`${deleteTarget?.name} und die gesamte Anwesenheitshistorie werden entfernt. Diese Aktion kann nicht rückgängig gemacht werden.`}
+        confirmLabel="Endgültig löschen"
         destructive
       />
 

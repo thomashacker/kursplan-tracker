@@ -186,6 +186,13 @@ export interface Teilnehmer {
   id: string;
   club_id: string;
   name: string;
+  /** Editable "member since" date — used for growth stats. YYYY-MM-DD. */
+  joined_on: string;
+  /** NULL = still active. When set, treated as soft-deleted (ausgetreten). */
+  left_on: string | null;
+  notes: string | null;
+  /** Ad-hoc extensions (t-shirt size, phone, dietary, …). Free-form. */
+  metadata: Record<string, unknown>;
   created_by: string | null;
   created_at: string;
   // joined relations

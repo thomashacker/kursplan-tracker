@@ -10,6 +10,7 @@ import { GroupAttendanceAccordion } from "./GroupAttendanceAccordion";
 import { ActivityChart, type DailyPoint, type WeekdayPoint } from "./ActivityChart";
 import { CollapsibleSection } from "./CollapsibleSection";
 import { windowRange, mondayOnOrBefore, windowLongLabel } from "./dateRange";
+import { growthBetween, totalAt, formatDelta, formatPct, type GrowthDelta } from "@/lib/utils/teilnehmerGrowth";
 
 // ── helpers ───────────────────────────────────────────────────
 
@@ -472,11 +473,27 @@ export default async function StatistikenPage({
   groupStats.sort((a, b) => b.rate - a.rate);
   const hasGroupStats = groupStats.length > 0;
 
-  // ── Club-wide totals (independent of the time window) ────────
-  const { count: totalTeilnehmer } = await supabase
+  // ── Teilnehmer roster (for growth stats) ─────────────────────
+  const { data: rosterRows } = await supabase
     .from("teilnehmer")
-    .select("*", { count: "exact", head: true })
-    .eq("club_id", club.id);
+    .select("joined_on, left_on")
+    .eq("club_id", club.id)
+    .returns<{ joined_on: string; left_on: string | null }[]>();
+  const roster = rosterRows ?? [];
+
+  // The end of the time window is what counts as "now" for the KPI card
+  // — so historic windows still show a meaningful roster size.
+  const windowToIso = toISODate(to);
+  const windowFromIso = toISODate(from);
+  const totalTeilnehmer = totalAt(roster, windowToIso);
+
+  // Compare against the equally-sized period immediately preceding the window.
+  const periodMs = to.getTime() - from.getTime();
+  const priorFrom = new Date(from.getTime() - periodMs - 86_400_000);
+  const priorTo   = new Date(from.getTime() - 86_400_000);
+  const currentGrowth: GrowthDelta = growthBetween(roster, windowFromIso, windowToIso);
+  const priorGrowth: GrowthDelta   = growthBetween(roster, toISODate(priorFrom), toISODate(priorTo));
+
   const groupCount = teilnehmerGroups?.length ?? 0;
 
   const hasAttendanceDetail =
@@ -490,6 +507,10 @@ export default async function StatistikenPage({
     label: string;
     value: React.ReactNode;
     accent?: string;
+    growth?: {
+      current: GrowthDelta;
+      prior: GrowthDelta;
+    };
   }[] = [
     { label: "Trainings", value: totalSessions },
     { label: "Stunden", value: fmtHours(totalMinutes) },
@@ -505,7 +526,11 @@ export default async function StatistikenPage({
       value: totalProbetraining,
       accent: hasProbetraining ? "text-amber-600 dark:text-amber-400" : "",
     },
-    { label: "Teilnehmer", value: totalTeilnehmer ?? 0 },
+    {
+      label: "Teilnehmer",
+      value: totalTeilnehmer,
+      growth: { current: currentGrowth, prior: priorGrowth },
+    },
     { label: "Gruppen", value: groupCount },
   ];
 
@@ -558,22 +583,62 @@ export default async function StatistikenPage({
 
       {/* ── KPI grid (8 cards: 2/4/8 columns) ─────────────────── */}
       <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
-        {kpis.map((k) => (
-          <div
-            key={k.label}
-            className="rounded-2xl border border-border bg-card p-4 sm:p-5"
-          >
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1.5 leading-tight">
-              {k.label}
-            </p>
-            <p
-              className={`text-2xl sm:text-3xl font-bold leading-none tabular-nums ${k.accent ?? ""}`}
-              style={{ fontFamily: "var(--font-syne, system-ui)" }}
+        {kpis.map((k) => {
+          // Growth ribbon: net change over the current window + comparison to prior window.
+          const g = k.growth;
+          const netPositive = g && g.current.net > 0;
+          const netNegative = g && g.current.net < 0;
+          const priorNet = g ? g.current.net - g.prior.net : 0;
+          return (
+            <div
+              key={k.label}
+              className="rounded-2xl border border-border bg-card p-4 sm:p-5"
             >
-              {k.value}
-            </p>
-          </div>
-        ))}
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1.5 leading-tight">
+                {k.label}
+              </p>
+              <p
+                className={`text-2xl sm:text-3xl font-bold leading-none tabular-nums ${k.accent ?? ""}`}
+                style={{ fontFamily: "var(--font-syne, system-ui)" }}
+              >
+                {k.value}
+              </p>
+              {g && (
+                <div className="mt-2 flex items-center gap-1 text-[11px] tabular-nums">
+                  <span
+                    className={`inline-flex items-center gap-0.5 font-semibold ${
+                      netPositive
+                        ? "text-green-600 dark:text-green-400"
+                        : netNegative
+                        ? "text-rose-600 dark:text-rose-400"
+                        : "text-muted-foreground"
+                    }`}
+                  >
+                    {netPositive ? "▲" : netNegative ? "▼" : "•"}
+                    {formatDelta(g.current.net)}
+                  </span>
+                  <span className="text-muted-foreground">
+                    ({g.current.joined} zu · {g.current.left} weg)
+                  </span>
+                  {g.prior.startCount > 0 && (
+                    <span
+                      className={`ml-auto text-[10px] font-medium ${
+                        priorNet > 0
+                          ? "text-green-600 dark:text-green-400"
+                          : priorNet < 0
+                          ? "text-rose-600 dark:text-rose-400"
+                          : "text-muted-foreground"
+                      }`}
+                      title="Vergleich zum vorherigen Zeitraum"
+                    >
+                      vs. {formatPct(g.current.netPct)}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       {/* ── Activity chart (trainings + check-ins) ─────────── */}
