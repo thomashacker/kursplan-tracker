@@ -1235,6 +1235,8 @@ export function WeeklyPlanEditor({
             is_pinned: data.is_pinned,
             event_date: data.event_date,
             metadata: data.metadata,
+            completed_at: null,
+            completed_by: null,
             session_trainers: [
               ...trainer_ids.map((uid) => ({ session_id: created.id, user_id: uid, virtual_trainer_id: null })),
               ...virtual_trainer_ids.map((vid) => ({ session_id: created.id, user_id: null, virtual_trainer_id: vid })),
@@ -1890,7 +1892,7 @@ export function WeeklyPlanEditor({
                             <p className="text-xs text-muted-foreground/50 py-1 px-1">Kein Training</p>
                           ) : (
                             daySessions.map((session) => (
-                              <SessionCard key={session.id} session={session} trainers={trainers} virtualTrainers={virtualTrainers} topics={topics} sessionTypes={sessionTypes} canEdit={canEdit} isToday={isToday} attendanceSummary={attendanceSummaries.get(session.id)} onEdit={() => setEditingSession(session)} onDelete={() => requestDelete(session)} onAttendance={() => setAttendanceSession(session)} />
+                              <SessionCard key={session.id} session={session} trainers={trainers} virtualTrainers={virtualTrainers} topics={topics} sessionTypes={sessionTypes} canEdit={canEdit} isToday={isToday} weekStart={weekStart} attendanceSummary={attendanceSummaries.get(session.id)} onEdit={() => setEditingSession(session)} onDelete={() => requestDelete(session)} onAttendance={() => setAttendanceSession(session)} />
                             ))
                           )}
                         </div>
@@ -1925,7 +1927,7 @@ export function WeeklyPlanEditor({
                       </button>
                       <div className="flex-1 space-y-2">
                         {daySessions.map((session) => (
-                          <SessionCard key={session.id} session={session} trainers={trainers} virtualTrainers={virtualTrainers} topics={topics} sessionTypes={sessionTypes} canEdit={canEdit} isToday={isToday} attendanceSummary={attendanceSummaries.get(session.id)} onEdit={() => setEditingSession(session)} onDelete={() => requestDelete(session)} onAttendance={() => setAttendanceSession(session)} />
+                          <SessionCard key={session.id} session={session} trainers={trainers} virtualTrainers={virtualTrainers} topics={topics} sessionTypes={sessionTypes} canEdit={canEdit} isToday={isToday} weekStart={weekStart} attendanceSummary={attendanceSummaries.get(session.id)} onEdit={() => setEditingSession(session)} onDelete={() => requestDelete(session)} onAttendance={() => setAttendanceSession(session)} />
                         ))}
                         {canEdit && (
                           <button onClick={() => openNewSession(dayIndex)} className="w-full text-xs text-muted-foreground/50 border border-dashed border-border rounded-xl py-2 hover:border-primary/40 hover:text-primary transition-colors">
@@ -1974,7 +1976,6 @@ export function WeeklyPlanEditor({
         <AttendanceModal
           session={attendanceSession}
           clubId={club.id}
-          weekStart={weekStart}
           canEdit={canEdit}
           onClose={() => { setAttendanceSession(null); setAttendanceSummaryRevision((r) => r + 1); }}
           onLocalSessionPatch={(patch) => {

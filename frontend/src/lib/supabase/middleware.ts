@@ -37,6 +37,18 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
+  // Gate /admin routes: 404 for everyone except the superadmin allowlist.
+  // Returning 404 (not a redirect) hides the route's existence from probes.
+  if (url.pathname.startsWith("/admin")) {
+    if (!user) {
+      return new NextResponse(null, { status: 404 });
+    }
+    const { data: isAdmin } = await supabase.rpc("is_superadmin");
+    if (!isAdmin) {
+      return new NextResponse(null, { status: 404 });
+    }
+  }
+
   // Redirect authenticated users away from auth pages (but not the reset page — needs an active session)
   if (
     user &&

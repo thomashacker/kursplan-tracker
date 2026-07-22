@@ -1,6 +1,6 @@
 import type { TrainingSession, Profile, SessionColor, VirtualTrainer, ClubTopic, ClubSessionType } from "@/types";
 import { SESSION_COLORS } from "@/types";
-import { formatTime } from "@/lib/utils/date";
+import { formatTime, getSessionDate } from "@/lib/utils/date";
 
 export interface AttendanceSummary {
   present: number;
@@ -15,18 +15,32 @@ interface Props {
   sessionTypes: ClubSessionType[];
   canEdit: boolean;
   isToday?: boolean;
+  /** ISO Monday of this session's week — used to derive isPast for the completion nudge. */
+  weekStart?: string;
   attendanceSummary?: AttendanceSummary;
   onEdit: () => void;
   onDelete: () => void;
   onAttendance?: () => void;
 }
 
-export function SessionCard({ session, trainers, virtualTrainers, topics, sessionTypes, canEdit, isToday, attendanceSummary, onEdit, onDelete, onAttendance }: Props) {
+export function SessionCard({ session, trainers, virtualTrainers, topics, sessionTypes, canEdit, isToday, weekStart, attendanceSummary, onEdit, onDelete, onAttendance }: Props) {
   const cancelled = session.is_cancelled;
   const isEvent = session.kind === "event";
   const colorKey = (session.color ?? "neutral") as SessionColor;
   const colorCfg = SESSION_COLORS[colorKey] ?? SESSION_COLORS.neutral;
   const hasColor = colorKey !== "neutral" && !cancelled && !isEvent;
+
+  // Completion state (only meaningful for kind='training').
+  const isCompleted = session.kind === "training" && session.completed_at != null;
+  const isPast = weekStart
+    ? (() => {
+        const d = getSessionDate(weekStart, session.day_of_week);
+        const [eh, em] = session.time_end.split(":").map(Number);
+        d.setHours(eh, em, 0, 0);
+        return d.getTime() < new Date().getTime();
+      })()
+    : false;
+  const needsCompletion = session.kind === "training" && !cancelled && !isCompleted && isPast;
 
   const trainerProfiles: Profile[] = session.session_trainers?.length
     ? session.session_trainers.filter((st) => st.user_id).map((st) => trainers.find((t) => t.id === st.user_id)).filter((t): t is Profile => Boolean(t))
@@ -50,7 +64,7 @@ export function SessionCard({ session, trainers, virtualTrainers, topics, sessio
           : isToday && !hasColor
           ? "border-primary/40 bg-primary/5 bg-card"
           : "border-border bg-card"
-      }`}
+      } ${isCompleted ? "opacity-80" : ""}`}
       style={hasColor ? { backgroundColor: colorCfg.bg, borderColor: colorCfg.border } : undefined}
     >
       {/* Event badge */}
@@ -215,26 +229,48 @@ export function SessionCard({ session, trainers, virtualTrainers, topics, sessio
         <p className="text-xs text-muted-foreground mt-1 line-clamp-2 italic">{session.description}</p>
       )}
 
-      {/* Attendance button — shows count when available */}
-      {onAttendance && !cancelled && (
+      {/* Attendance / completion button */}
+      {onAttendance && !cancelled && !isEvent && (
         <button
           type="button"
           onClick={onAttendance}
-          className="mt-1.5 w-full flex items-center justify-between gap-1 text-[10px] font-medium text-muted-foreground hover:text-foreground border border-dashed border-border rounded-lg py-1 px-2.5 hover:border-border/80 hover:bg-secondary/50 transition-colors"
-          title="Anwesenheit erfassen"
+          className={`mt-1.5 w-full flex items-center justify-between gap-1 text-[10px] font-medium rounded-lg py-1 px-2.5 transition-colors ${
+            isCompleted
+              ? "text-green-700 dark:text-green-400 bg-green-500/5 border border-green-500/25 hover:bg-green-500/10"
+              : needsCompletion
+              ? "text-amber-800 dark:text-amber-300 bg-amber-500/8 border border-amber-500/40 hover:bg-amber-500/15"
+              : "text-muted-foreground hover:text-foreground border border-dashed border-border hover:border-border/80 hover:bg-secondary/50"
+          }`}
+          title={
+            isCompleted
+              ? "Abgeschlossen — klicken zum Bearbeiten"
+              : needsCompletion
+              ? "Noch abschließen"
+              : "Anwesenheit erfassen"
+          }
         >
           <span className="flex items-center gap-1">
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-              <circle cx="9" cy="7" r="4"/>
-              <polyline points="16 11 18 13 22 9"/>
-            </svg>
-            Anwesenheit
+            {isCompleted ? (
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="20 6 9 17 4 12"/>
+              </svg>
+            ) : needsCompletion ? (
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+            ) : (
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                <circle cx="9" cy="7" r="4"/>
+                <polyline points="16 11 18 13 22 9"/>
+              </svg>
+            )}
+            {isCompleted ? "Abgeschlossen" : needsCompletion ? "Abschließen" : "Anwesenheit"}
           </span>
           {attendanceSummary && (
             attendanceSummary.expected !== null ? (
               <span className={`font-semibold tabular-nums ${
-                attendanceSummary.present > 0 && attendanceSummary.present >= attendanceSummary.expected
+                isCompleted
+                  ? "text-green-700 dark:text-green-400"
+                  : attendanceSummary.present > 0 && attendanceSummary.present >= attendanceSummary.expected
                   ? "text-green-600 dark:text-green-400"
                   : attendanceSummary.present > 0
                   ? "text-amber-600 dark:text-amber-400"
@@ -243,7 +279,9 @@ export function SessionCard({ session, trainers, virtualTrainers, topics, sessio
                 {attendanceSummary.present}/{attendanceSummary.expected}
               </span>
             ) : attendanceSummary.present > 0 ? (
-              <span className="text-green-600 dark:text-green-400 font-semibold tabular-nums">
+              <span className={`font-semibold tabular-nums ${
+                isCompleted ? "text-green-700 dark:text-green-400" : "text-green-600 dark:text-green-400"
+              }`}>
                 {attendanceSummary.present}
               </span>
             ) : null

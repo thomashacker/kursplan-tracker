@@ -6,7 +6,7 @@ import { motion, useReducedMotion } from "framer-motion";
 import type { User } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Home, User as UserIcon, LogOut } from "lucide-react";
+import { Home, User as UserIcon, LogOut, Gauge } from "lucide-react";
 
 const springSnap = { type: "spring" as const, stiffness: 480, damping: 32 };
 
@@ -65,7 +65,7 @@ function NavButton({
   );
 }
 
-export function Navbar({ user }: { user: User }) {
+export function Navbar({ user, isSuperadmin }: { user: User; isSuperadmin?: boolean }) {
   const router = useRouter();
   const pathname = usePathname();
 
@@ -122,6 +122,14 @@ export function Navbar({ user }: { user: User }) {
             icon={<UserIcon size={17} />}
             label="Konto"
           />
+          {isSuperadmin && (
+            <NavButton
+              href="/admin"
+              active={pathname.startsWith("/admin")}
+              icon={<Gauge size={17} />}
+              label="Ops"
+            />
+          )}
           <NavButton
             onClick={signOut}
             destructive

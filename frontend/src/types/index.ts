@@ -129,6 +129,9 @@ export interface TrainingSession {
   is_pinned: boolean;           // always visible in public view even under filters
   event_date: string | null;    // YYYY-MM-DD; set when kind === "event"
   metadata: Record<string, unknown>; // capacity, signup_url, cost, age_range, …
+  // completion (kind='training' only). NULL = pending (past or future).
+  completed_at: string | null;  // ISO timestamp when trainer clicked "abschließen"
+  completed_by: string | null;  // auth.users.id
   created_at: string;
   updated_at: string;
   // attendance
