@@ -58,8 +58,6 @@ const STATUS_CFG: Record<AttendanceStatus, { label: string; icon: React.ReactNod
 interface Props {
   session: TrainingSession;
   clubId: string;
-  /** ISO Monday of the session's week — used to look up "last time" attendance. */
-  weekStart: string;
   canEdit: boolean;
   onClose: () => void;
   /**
@@ -75,11 +73,13 @@ interface Props {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function AttendanceModal({ session, clubId, weekStart, canEdit, onClose, onLocalSessionPatch }: Props) {
+export function AttendanceModal({ session, clubId, canEdit, onClose, onLocalSessionPatch }: Props) {
   const supabase = createClient();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [completing, setCompleting] = useState(false);
+  const [completedAt, setCompletedAt] = useState<string | null>(session.completed_at ?? null);
   const [scannerOpen, setScannerOpen] = useState(false);
   const [scanResult, setScanResult] = useState<{ name: string; alreadyPresent: boolean } | null>(null);
   const [weitereOpen, setWeitereOpen] = useState(false);
@@ -95,10 +95,6 @@ export function AttendanceModal({ session, clubId, weekStart, canEdit, onClose, 
   const [groupMembers, setGroupMembers] = useState<{ group_id: string; teilnehmer_id: string }[]>([]);
   const [attendance, setAttendance] = useState<Map<string, AttendanceStatus>>(new Map());
   const [expectedGroupIds, setExpectedGroupIds] = useState<string[]>([]);
-
-  // "Letztes Mal" cohort — teilnehmer_ids present at the previous instance of
-  // this training slot. Empty when there's no history.
-  const [lastTimeIds, setLastTimeIds] = useState<Set<string>>(new Set());
 
   // ── Fetch data ──────────────────────────────────────────────────────────────
   const loadData = useCallback(async () => {
@@ -126,55 +122,8 @@ export function AttendanceModal({ session, clubId, weekStart, canEdit, onClose, 
 
     setExpectedGroupIds((expGroups ?? []).map((eg: { group_id: string }) => eg.group_id));
 
-    // ── "Letztes Mal" lookup ─────────────────────────────────────────────
-    // Find the most recent past instance of this training slot. Preference:
-    //   1. Same recurring template, an earlier week.
-    //   2. Fallback: same weekday + same start time in this club, earlier week.
-    // Only consider trainings (kind='training'); events aren't a "usual crowd".
-    type PrevRow = { id: string; training_weeks: { week_start: string } | { week_start: string }[] };
-    const baseSelect = "id, training_weeks!inner(week_start, club_id)";
-    let prev: PrevRow[] | null = null;
-    if (session.template_id) {
-      const { data } = await supabase
-        .from("training_sessions")
-        .select(baseSelect)
-        .eq("template_id", session.template_id)
-        .eq("training_weeks.club_id", clubId)
-        .neq("id", session.id)
-        .lt("training_weeks.week_start", weekStart)
-        .order("week_start", { ascending: false, referencedTable: "training_weeks" })
-        .limit(1);
-      prev = (data ?? null) as PrevRow[] | null;
-    }
-    if (!prev || prev.length === 0) {
-      const { data } = await supabase
-        .from("training_sessions")
-        .select(baseSelect)
-        .eq("training_weeks.club_id", clubId)
-        .eq("kind", "training")
-        .eq("is_cancelled", false)
-        .eq("day_of_week", session.day_of_week)
-        .eq("time_start", session.time_start)
-        .neq("id", session.id)
-        .lt("training_weeks.week_start", weekStart)
-        .order("week_start", { ascending: false, referencedTable: "training_weeks" })
-        .limit(1);
-      prev = (data ?? null) as PrevRow[] | null;
-    }
-
-    if (prev && prev.length > 0) {
-      const { data: prevAtt } = await supabase
-        .from("session_attendance")
-        .select("teilnehmer_id")
-        .eq("session_id", prev[0].id)
-        .eq("status", "present");
-      setLastTimeIds(new Set((prevAtt ?? []).map((r: { teilnehmer_id: string }) => r.teilnehmer_id)));
-    } else {
-      setLastTimeIds(new Set());
-    }
-
     setLoading(false);
-  }, [supabase, clubId, session.id, session.template_id, session.day_of_week, session.time_start, weekStart]);
+  }, [supabase, clubId, session.id]);
 
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => { loadData(); }, [loadData]);
@@ -265,32 +214,51 @@ export function AttendanceModal({ session, clubId, weekStart, canEdit, onClose, 
     return () => clearTimeout(id);
   }, [probetraining, session.id, supabase, onLocalSessionPatch]);
 
-  // ── Wie letztes Mal — mark the "letztes Mal" cohort present ───────────────
-  async function markLikeLastTime() {
-    if (!canEdit || lastTimeIds.size === 0) return;
-    setSaving(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    // Only touch teilnehmer that (a) belong to this club, (b) were present last
-    // time, and (c) don't already have a status this session — so we don't
-    // overwrite a manual "excused/absent".
-    const targets = teilnehmer.filter(
-      (t) => lastTimeIds.has(t.id) && !attendance.has(t.id),
-    );
-    const rows = targets.map((t) => ({
-      session_id: session.id,
-      teilnehmer_id: t.id,
-      status: "present" as const,
-      method: "manual" as const,
-      checked_in_by: user?.id ?? null,
-      checked_in_at: new Date().toISOString(),
-    }));
-    if (rows.length > 0) {
-      await supabase.from("session_attendance").upsert(rows, { onConflict: "session_id,teilnehmer_id" });
-      const map = new Map(attendance);
-      for (const t of targets) map.set(t.id, "present");
-      setAttendance(map);
+  // ── Training abschließen ────────────────────────────────────────────────
+  // Explicit completion flag. Stats only count trainings with completed_at
+  // set, so this is what turns a session from "existed" into "counts".
+  async function completeSession() {
+    if (!canEdit) return;
+    setCompleting(true);
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const nowIso = new Date().toISOString();
+    const { error } = await supabase
+      .from("training_sessions")
+      .update({ completed_at: nowIso, completed_by: user?.id ?? null })
+      .eq("id", session.id);
+    if (error) {
+      toast.error("Konnte nicht abgeschlossen werden");
+      setCompleting(false);
+      return;
     }
-    setSaving(false);
+    setCompletedAt(nowIso);
+    onLocalSessionPatch?.({
+      completed_at: nowIso,
+      completed_by: user?.id ?? null,
+    });
+    setCompleting(false);
+    toast.success("Training abgeschlossen");
+    onClose();
+  }
+
+  async function uncompleteSession() {
+    if (!canEdit) return;
+    setCompleting(true);
+    const { error } = await supabase
+      .from("training_sessions")
+      .update({ completed_at: null, completed_by: null })
+      .eq("id", session.id);
+    if (error) {
+      toast.error("Konnte nicht aufgehoben werden");
+      setCompleting(false);
+      return;
+    }
+    setCompletedAt(null);
+    onLocalSessionPatch?.({ completed_at: null, completed_by: null });
+    setCompleting(false);
+    toast.success("Abschluss aufgehoben");
   }
 
   // ── Mark all present ────────────────────────────────────────────────────────
@@ -359,9 +327,19 @@ export function AttendanceModal({ session, clubId, weekStart, canEdit, onClose, 
         {/* ── Header ─────────────────────────────────────────── */}
         <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-border shrink-0">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-0.5">
-              Anwesenheit — {DAY_NAMES[session.day_of_week]}
-            </p>
+            <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                Anwesenheit — {DAY_NAMES[session.day_of_week]}
+              </p>
+              {completedAt && (
+                <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-full bg-green-500/15 text-green-700 dark:text-green-400 leading-none">
+                  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="20 6 9 17 4 12"/>
+                  </svg>
+                  Abgeschlossen
+                </span>
+              )}
+            </div>
             <p className="font-bold text-base leading-tight" style={{ fontFamily: "var(--font-syne, system-ui)" }}>
               {formatTime(session.time_start)} – {formatTime(session.time_end)}
             </p>
@@ -470,22 +448,6 @@ export function AttendanceModal({ session, clubId, weekStart, canEdit, onClose, 
                   </svg>
                   Alle anwesend
                 </button>
-                {lastTimeIds.size > 0 && (
-                  <button
-                    type="button"
-                    onClick={markLikeLastTime}
-                    disabled={saving}
-                    className="h-8 px-3 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300 text-xs font-medium hover:bg-amber-500/20 transition-colors flex items-center gap-1.5 disabled:opacity-40"
-                    title={`${lastTimeIds.size} Teilnehmer waren letztes Mal dabei`}
-                  >
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M23 4v6h-6"/>
-                      <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
-                    </svg>
-                    Wie letztes Mal
-                    <span className="tabular-nums font-bold">{lastTimeIds.size}</span>
-                  </button>
-                )}
                 <button
                   type="button"
                   onClick={() => setScannerOpen((o) => !o)}
@@ -565,17 +527,11 @@ export function AttendanceModal({ session, clubId, weekStart, canEdit, onClose, 
                     !q || t.name.toLowerCase().includes(q);
                   const searching = q.length > 0;
 
-                  // "Letztes Mal" attendees sort to the top of every sublist so
-                  // the trainer's thumb lands on the usual crowd first. Stable
-                  // within each partition (Array.sort is stable in modern JS).
-                  const bumpLast = (a: Teilnehmer, b: Teilnehmer) =>
-                    (lastTimeIds.has(b.id) ? 1 : 0) - (lastTimeIds.has(a.id) ? 1 : 0);
-
-                  const filteredExpected = expectedTeilnehmer.filter(matches).sort(bumpLast);
+                  const filteredExpected = expectedTeilnehmer.filter(matches);
                   const expectedIds = new Set(expectedTeilnehmer.map((t) => t.id));
                   const remaining = teilnehmer.filter((t) => !expectedIds.has(t.id));
-                  const filteredRemaining = remaining.filter(matches).sort(bumpLast);
-                  const filteredFlat = teilnehmer.filter(matches).sort(bumpLast);
+                  const filteredRemaining = remaining.filter(matches);
+                  const filteredFlat = teilnehmer.filter(matches);
 
                   const nothing =
                     hasExpectedGroups
@@ -616,7 +572,6 @@ export function AttendanceModal({ session, clubId, weekStart, canEdit, onClose, 
                                   teilnehmer={t}
                                   status={attendance.get(t.id)}
                                   groups={getGroupsForTeilnehmer(t.id)}
-                                  wasLastTime={lastTimeIds.has(t.id)}
                                   canEdit={canEdit}
                                   onToggle={() => toggleStatus(t.id, attendance.get(t.id))}
                                 />
@@ -671,7 +626,6 @@ export function AttendanceModal({ session, clubId, weekStart, canEdit, onClose, 
                             teilnehmer={t}
                             status={attendance.get(t.id)}
                             groups={getGroupsForTeilnehmer(t.id)}
-                            wasLastTime={lastTimeIds.has(t.id)}
                             canEdit={canEdit}
                             onToggle={() => toggleStatus(t.id, attendance.get(t.id))}
                           />
@@ -682,6 +636,60 @@ export function AttendanceModal({ session, clubId, weekStart, canEdit, onClose, 
                 })()
               )}
             </div>
+
+            {/* ── Completion footer ────────────────────────────── */}
+            {session.kind === "training" && canEdit && (
+              <div className="border-t border-border bg-card px-5 py-3 shrink-0 flex items-center justify-between gap-3">
+                {completedAt ? (
+                  <>
+                    <div className="text-xs text-muted-foreground min-w-0">
+                      <span className="text-green-600 dark:text-green-400 font-semibold">
+                        Abgeschlossen
+                      </span>
+                      <span className="ml-1">
+                        · {new Date(completedAt).toLocaleDateString("de-DE", {
+                          day: "numeric",
+                          month: "short",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={uncompleteSession}
+                      disabled={completing}
+                      className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground transition-colors disabled:opacity-50 shrink-0"
+                    >
+                      Aufheben
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div className="text-xs text-muted-foreground truncate">
+                      {presentCount === 0
+                        ? "Noch keine Anwesenheit erfasst"
+                        : `${presentCount} anwesend · bereit zum Abschließen`}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={completeSession}
+                      disabled={completing}
+                      className="h-9 px-4 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center gap-2 shrink-0"
+                    >
+                      {completing ? (
+                        <span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                      ) : (
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="20 6 9 17 4 12"/>
+                        </svg>
+                      )}
+                      Training abschließen
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
           </>
         )}
 
@@ -729,15 +737,12 @@ function TeilnehmerRow({
   teilnehmer,
   status,
   groups,
-  wasLastTime,
   canEdit,
   onToggle,
 }: {
   teilnehmer: Teilnehmer;
   status: AttendanceStatus | undefined;
   groups: TeilnehmerGroup[];
-  /** True if this person was present at the previous instance of this training slot. */
-  wasLastTime?: boolean;
   canEdit: boolean;
   onToggle: () => void;
 }) {
@@ -752,21 +757,7 @@ function TeilnehmerRow({
 
       {/* Name + notes + groups */}
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <p className="text-sm font-medium leading-tight truncate">{teilnehmer.name}</p>
-          {wasLastTime && (
-            <span
-              className="shrink-0 inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-400 leading-none"
-              title="Letztes Mal anwesend"
-            >
-              <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M23 4v6h-6"/>
-                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
-              </svg>
-              Letztes Mal
-            </span>
-          )}
-        </div>
+        <p className="text-sm font-medium leading-tight truncate">{teilnehmer.name}</p>
         {teilnehmer.notes && (
           <p
             className="text-[11px] text-muted-foreground/90 italic leading-snug mt-0.5 line-clamp-1"

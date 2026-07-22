@@ -142,6 +142,13 @@ export default function NutzungsbedingungenPage() {
             Vertragspflichten (Kardinalpflichten). Die Haftung für mittelbare Schäden,
             Datenverluste und entgangenen Gewinn ist ausgeschlossen, soweit gesetzlich zulässig.
           </p>
+          <p className="mt-3">
+            Der Betreiber überwacht Umfang und technische Kennzahlen der Plattformnutzung
+            (u.&nbsp;a. Speicherverbrauch, Anzahl gespeicherter Datensätze, Zeitpunkt der letzten
+            Aktivität pro Verein). Dies dient der Kapazitätsplanung, dem stabilen Betrieb sowie
+            der Erkennung missbräuchlicher Nutzung. Es werden dabei keine Inhalte der Nutzer
+            eingesehen.
+          </p>
         </Section>
 
         {/* § 7 */}

@@ -61,6 +61,7 @@ export default function DatenschutzPage() {
               { href: "#speicherung", label: "Allgemeine Informationen zur Datenspeicherung und Löschung" },
               { href: "#rechte", label: "Rechte der betroffenen Personen" },
               { href: "#webhosting", label: "Bereitstellung des Onlineangebots und Webhosting" },
+              { href: "#betriebsanalyse", label: "Betriebs- und Nutzungsanalyse" },
               { href: "#minderjaehrige", label: "Besondere Hinweise für minderjährige Nutzer" },
               { href: "#registrierung", label: "Registrierung, Anmeldung und Nutzerkonto" },
               { href: "#vereinsmitglieder", label: "Verarbeitung von Vereinsmitgliederdaten" },
@@ -382,6 +383,47 @@ export default function DatenschutzPage() {
                   Logfile-Informationen werden für die Dauer von maximal 30 Tagen gespeichert
                   und danach gelöscht oder anonymisiert.
                 </dd>
+              </div>
+            </dl>
+          </div>
+        </section>
+
+        {/* Betriebs- und Nutzungsanalyse */}
+        <section id="betriebsanalyse" className="space-y-3 scroll-mt-6">
+          <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+            Betriebs- und Nutzungsanalyse
+          </h2>
+          <div className="text-sm leading-relaxed text-muted-foreground space-y-3">
+            <p>
+              Zur Sicherstellung eines stabilen Betriebs sowie zur Missbrauchs- und
+              Kapazitätsanalyse werden aggregierte technische Nutzungsdaten pro Verein
+              (Speicherverbrauch, Anzahl Sessions und Teilnehmer, Zeitpunkt der letzten
+              Aktivität) erfasst und ausschließlich dem Plattformbetreiber in einem internen
+              Dashboard angezeigt. Es erfolgt keine Weitergabe an Dritte, und es werden keine
+              Inhalte der Nutzer eingesehen.
+            </p>
+            <dl className="space-y-2">
+              <div>
+                <dt className="font-medium text-foreground">Verarbeitete Datenarten</dt>
+                <dd>
+                  Aggregierte Nutzungsstatistiken pro Verein (Bytes, Anzahl Datensätze,
+                  Zeitstempel)
+                </dd>
+              </div>
+              <div>
+                <dt className="font-medium text-foreground">Betroffene Personen</dt>
+                <dd>Verein-Owner und Trainer</dd>
+              </div>
+              <div>
+                <dt className="font-medium text-foreground">Zwecke der Verarbeitung</dt>
+                <dd>
+                  Kapazitätsplanung, Betrieb, Missbrauchserkennung, Einhaltung technischer
+                  Nutzungsgrenzen
+                </dd>
+              </div>
+              <div>
+                <dt className="font-medium text-foreground">Rechtsgrundlage</dt>
+                <dd>Berechtigte Interessen (Art.&nbsp;6 Abs.&nbsp;1 lit.&nbsp;f DSGVO)</dd>
               </div>
             </dl>
           </div>

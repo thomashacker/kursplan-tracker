@@ -1,9 +1,14 @@
 import { createClient } from "@/lib/supabase/server";
-import { redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { Navbar } from "@/components/layout/Navbar";
 import { SiteFooter } from "@/components/layout/SiteFooter";
 
-export default async function DashboardLayout({
+export const metadata = {
+  title: "Ops · Kursplan",
+  robots: { index: false, follow: false },
+};
+
+export default async function AdminLayout({
   children,
 }: {
   children: React.ReactNode;
@@ -13,13 +18,14 @@ export default async function DashboardLayout({
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) redirect("/anmelden");
+  if (!user) notFound();
 
   const { data: isSuperadmin } = await supabase.rpc("is_superadmin");
+  if (!isSuperadmin) notFound();
 
   return (
     <div className="min-h-screen flex flex-col">
-      <Navbar user={user} isSuperadmin={isSuperadmin === true} />
+      <Navbar user={user} isSuperadmin />
       <main className="flex-1 container max-w-7xl mx-auto px-4 py-8">
         {children}
       </main>

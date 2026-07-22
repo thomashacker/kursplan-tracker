@@ -17,6 +17,7 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart";
+import { TagFrequencyPanel, type TagStat } from "./TagFrequencyPanel";
 
 export type DailyPoint = {
   dateISO: string;
@@ -53,6 +54,13 @@ interface Props {
   groups?: { id: string; name: string; color: string | null }[];
   hasAttendance: boolean;
   hasProbetraining: boolean;
+  /** Topic / session-type frequencies for the panel below the chart. */
+  topicsAll?: TagStat[];
+  typesAll?: TagStat[];
+  topicsByGroup?: Record<string, TagStat[]>;
+  typesByGroup?: Record<string, TagStat[]>;
+  /** Reference "now" for the staleness labels — passed from server for stability. */
+  nowMs?: number;
 }
 
 export function ActivityChart({
@@ -63,6 +71,11 @@ export function ActivityChart({
   groups = [],
   hasAttendance,
   hasProbetraining,
+  topicsAll = [],
+  typesAll = [],
+  topicsByGroup,
+  typesByGroup,
+  nowMs,
 }: Props) {
   const [mode, setMode] = useState<"daily" | "weekday">("daily");
   const [selectedGroup, setSelectedGroup] = useState<"all" | string>("all");
@@ -84,6 +97,8 @@ export function ActivityChart({
   // falling back to base when the map doesn't have it (defensive).
   const dailySrc = selectedGroup === "all" ? daily : dailyByGroup?.[selectedGroup] ?? daily;
   const weekdaySrc = selectedGroup === "all" ? weekday : weekdayByGroup?.[selectedGroup] ?? weekday;
+  const topicsSrc = selectedGroup === "all" ? topicsAll : topicsByGroup?.[selectedGroup] ?? topicsAll;
+  const typesSrc  = selectedGroup === "all" ? typesAll  : typesByGroup?.[selectedGroup]  ?? typesAll;
 
   const activeGroup = groups.find((g) => g.id === selectedGroup);
   const groupLabel = activeGroup?.name ?? "Alle Gruppen";
@@ -377,6 +392,13 @@ export function ActivityChart({
           </ChartContainer>
         )}
       </div>
+
+      {/* Topic + session-type frequency, filtered by the same group filter */}
+      <TagFrequencyPanel
+        topics={topicsSrc}
+        types={typesSrc}
+        nowMs={nowMs ?? new Date().getTime()}
+      />
     </section>
   );
 }

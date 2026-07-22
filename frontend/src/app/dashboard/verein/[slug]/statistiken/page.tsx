@@ -8,6 +8,7 @@ import { formatDate, getSessionDate, toISODate } from "@/lib/utils/date";
 import TimeWindowPicker, { type TimeWindow } from "./TimeWindowPicker";
 import { GroupAttendanceAccordion } from "./GroupAttendanceAccordion";
 import { ActivityChart, type DailyPoint, type WeekdayPoint } from "./ActivityChart";
+import type { TagStat } from "./TagFrequencyPanel";
 import { CollapsibleSection } from "./CollapsibleSection";
 import { windowRange, mondayOnOrBefore, windowLongLabel } from "./dateRange";
 import { growthBetween, totalAt, formatDelta, formatPct, type GrowthDelta } from "@/lib/utils/teilnehmerGrowth";
@@ -92,7 +93,7 @@ export default async function StatistikenPage({
   const { data: pastWeeks } = await supabase
     .from("training_weeks")
     .select(
-      "week_start, training_sessions(id, time_start, time_end, is_cancelled, day_of_week, topics, session_types, probetraining_count, kind, session_trainers(user_id, virtual_trainer_id))",
+      "week_start, training_sessions(id, time_start, time_end, is_cancelled, day_of_week, topics, session_types, probetraining_count, kind, completed_at, session_trainers(user_id, virtual_trainer_id))",
     )
     .eq("club_id", club.id)
     .gte("week_start", fromMondayISO)
@@ -126,6 +127,7 @@ export default async function StatistikenPage({
     session_types: string[];
     probetraining_count: number;
     kind: "training" | "event";
+    completed_at: string | null;
     week_start: string;
   };
 
@@ -143,6 +145,7 @@ export default async function StatistikenPage({
       (s) =>
         s.kind === "training" &&      // events are excluded from training KPIs
         !s.is_cancelled &&
+        s.completed_at !== null &&    // only count sessions the trainer actually closed
         isInRange(week.week_start, s.day_of_week, s.time_end),
     );
 
@@ -313,9 +316,9 @@ export default async function StatistikenPage({
   }));
 
   // ── Topic & Trainingsart attendance ──────────────────────────
-  type TagStat = { sessions: number; checkIns: number };
-  const topicMap = new Map<string, TagStat>();
-  const typeMap = new Map<string, TagStat>();
+  type TagAttendance = { sessions: number; checkIns: number };
+  const topicMap = new Map<string, TagAttendance>();
+  const typeMap = new Map<string, TagAttendance>();
 
   for (const s of allSessions) {
     const checkIns = sessionCheckInMap.get(s.id) ?? 0;
@@ -362,11 +365,25 @@ export default async function StatistikenPage({
   const maxTopicCheckIns = topicRows[0]?.checkIns ?? 1;
   const maxTypeCheckIns = typeRows[0]?.checkIns ?? 1;
 
-  // ── Group attendance rates ────────────────────────────────────
-  const { data: teilnehmerGroups } = await supabase
-    .from("teilnehmer_groups")
-    .select("id, name, color")
-    .eq("club_id", club.id);
+  // ── Group attendance rates + club topic/type catalog (parallel) ────
+  const [
+    { data: teilnehmerGroups },
+    { data: clubTopicsCatalog },
+    { data: clubTypesCatalog },
+  ] = await Promise.all([
+    supabase
+      .from("teilnehmer_groups")
+      .select("id, name, color")
+      .eq("club_id", club.id),
+    supabase
+      .from("club_topics")
+      .select("name, color")
+      .eq("club_id", club.id),
+    supabase
+      .from("club_session_types")
+      .select("name, color")
+      .eq("club_id", club.id),
+  ]);
 
   const { data: groupMembers } = teilnehmerGroups?.length
     ? await supabase
@@ -524,6 +541,58 @@ export default async function StatistikenPage({
       probetraining: gDayProbe[dow],
     }));
     chartGroups.push({ id: g.id, name: g.name, color: g.color ?? null });
+  }
+
+  // ── Topic & session-type frequency panel (per group + all) ──────────────
+  // Pre-compute {count, lastISO} per topic/type per group so the client can
+  // hot-swap the list on filter change with no re-work. Zero-count catalog
+  // entries (topics/types that exist in the club but have no sessions in
+  // the window) are appended so gaps are visible.
+  const topicColorByName = new Map<string, string | null>(
+    (clubTopicsCatalog ?? []).map((t) => [t.name as string, (t.color as string | null) ?? null]),
+  );
+  const typeColorByName = new Map<string, string | null>(
+    (clubTypesCatalog ?? []).map((t) => [t.name as string, (t.color as string | null) ?? null]),
+  );
+  const knownTopicNames = (clubTopicsCatalog ?? []).map((t) => t.name as string);
+  const knownTypeNames  = (clubTypesCatalog  ?? []).map((t) => t.name as string);
+
+  function buildTagStats(
+    sessions: SessionMeta[],
+    pick: (s: SessionMeta) => string[],
+    colorMap: Map<string, string | null>,
+    catalog: string[],
+  ): TagStat[] {
+    const agg = new Map<string, { count: number; lastISO: string | null }>();
+    for (const s of sessions) {
+      const iso = toISODate(getSessionDate(s.week_start, s.day_of_week));
+      for (const name of pick(s)) {
+        const prev = agg.get(name) ?? { count: 0, lastISO: null };
+        agg.set(name, {
+          count: prev.count + 1,
+          lastISO: !prev.lastISO || iso > prev.lastISO ? iso : prev.lastISO,
+        });
+      }
+    }
+    // Add zero entries for catalog names never used in this window.
+    for (const name of catalog) if (!agg.has(name)) agg.set(name, { count: 0, lastISO: null });
+    return [...agg.entries()].map(([name, s]) => ({
+      name,
+      color: colorMap.get(name) ?? null,
+      count: s.count,
+      lastISO: s.lastISO,
+    }));
+  }
+
+  const topicStatsAll = buildTagStats(allSessions, (s) => s.topics ?? [], topicColorByName, knownTopicNames);
+  const typeStatsAll  = buildTagStats(allSessions, (s) => s.session_types ?? [], typeColorByName, knownTypeNames);
+
+  const topicStatsByGroup: Record<string, TagStat[]> = {};
+  const typeStatsByGroup:  Record<string, TagStat[]> = {};
+  for (const g of chartGroups) {
+    const groupSessions = allSessions.filter((s) => sessionGroupMap.get(s.id)?.has(g.id));
+    topicStatsByGroup[g.id] = buildTagStats(groupSessions, (s) => s.topics ?? [], topicColorByName, knownTopicNames);
+    typeStatsByGroup[g.id]  = buildTagStats(groupSessions, (s) => s.session_types ?? [], typeColorByName, knownTypeNames);
   }
 
   // ── Teilnehmer roster (for growth stats) ─────────────────────
@@ -697,11 +766,16 @@ export default async function StatistikenPage({
         groups={chartGroups}
         hasAttendance={hasAttendanceData}
         hasProbetraining={hasProbetraining}
+        topicsAll={topicStatsAll}
+        typesAll={typeStatsAll}
+        topicsByGroup={topicStatsByGroup}
+        typesByGroup={typeStatsByGroup}
+        nowMs={to.getTime()}
       />
 
       {/* ── Attendance details (collapsible) ────────────────── */}
       {hasAttendanceDetail && (
-        <CollapsibleSection title="Anwesenheit · Details" defaultOpen={true}>
+        <CollapsibleSection title="Anwesenheit · Details" defaultOpen={false}>
           {hasGroupStats && (
             <div>
               <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/70 mb-3">
