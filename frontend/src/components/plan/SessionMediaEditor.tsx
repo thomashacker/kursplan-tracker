@@ -32,6 +32,8 @@ export function SessionMediaEditor({ sessionId, clubId }: Props) {
   const [uploading, setUploading] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
   const [linkCaption, setLinkCaption] = useState("");
+  const [storageCap, setStorageCap] = useState<number | null>(null);
+  const [storageUsed, setStorageUsed] = useState<number>(0);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const supabase = createClient();
@@ -50,6 +52,30 @@ export function SessionMediaEditor({ sessionId, clubId }: Props) {
         setLoading(false);
       });
   }, [sessionId, supabase]);
+
+  // Storage-cap gate: load the club's plan cap + latest snapshot so we can
+  // reject uploads that would push over the limit. NULL cap = unlimited,
+  // in which case we skip all checks.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const [{ data: capData }, { data: snapData }] = await Promise.all([
+        supabase.rpc("plan_limit", { p_club_id: clubId, p_resource: "storage_bytes" }),
+        supabase
+          .from("usage_snapshots")
+          .select("storage_bytes")
+          .eq("club_id", clubId)
+          .order("taken_at", { ascending: false })
+          .limit(1),
+      ]);
+      if (cancelled) return;
+      setStorageCap(capData == null ? null : Number(capData));
+      setStorageUsed(Number(snapData?.[0]?.storage_bytes ?? 0));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [clubId, supabase]);
 
   const atCap = rows.length >= SESSION_MEDIA_MAX;
 
@@ -109,6 +135,15 @@ export function SessionMediaEditor({ sessionId, clubId }: Props) {
         }
       }
 
+      // Storage-cap check: reject if this upload would push the club over
+      // its plan storage limit. NULL cap = unlimited plan → skip.
+      if (storageCap != null && storageUsed + uploadBlob.size > storageCap) {
+        const usedMb = (storageUsed / (1024 * 1024)).toFixed(1);
+        const capMb  = (storageCap  / (1024 * 1024)).toFixed(0);
+        toast.error(`Speicher voll (${usedMb} / ${capMb} MB). Lösche zuerst ältere Anhänge.`);
+        break;
+      }
+
       const path = `${clubId}/${sessionId}/${crypto.randomUUID()}.${ext}`;
       const { error: upErr } = await supabase.storage
         .from(BUCKET)
@@ -117,6 +152,10 @@ export function SessionMediaEditor({ sessionId, clubId }: Props) {
         toast.error(upErr.message);
         continue;
       }
+      // Optimistically add to our running total so subsequent files in the
+      // same batch also see the raised usage. Nightly snapshot will catch
+      // up authoritatively.
+      setStorageUsed((prev) => prev + uploadBlob.size);
       const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(path);
       await insertRow(isImage ? "image" : "pdf", pub.publicUrl, null);
     }

@@ -22,4 +22,6 @@ export interface OwnerRow {
   mediaCount: number;
   staffCount: number;
   lastActivity: string | null;
+  /** "unlimited" if any of the owner's clubs is on that plan, else "free". */
+  plan: "free" | "unlimited";
 }

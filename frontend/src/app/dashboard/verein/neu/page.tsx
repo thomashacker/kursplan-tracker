@@ -113,11 +113,17 @@ export default function NeuVereinPage() {
       });
 
     if (error) {
-      toast.error(
-        error.code === "23505"
-          ? "Dieses URL-Kürzel ist bereits vergeben."
-          : error.message
-      );
+      // 23505 can come from two indexes:
+      //   • clubs_slug_key                   → URL clash
+      //   • one_free_club_per_user           → already has a free Verein
+      // The constraint name is in error.message so we sniff for it.
+      let msg = error.message;
+      if (error.code === "23505") {
+        msg = /one_free_club_per_user/.test(error.message)
+          ? "Du hast bereits einen kostenlosen Verein. Pro Account ist nur einer möglich."
+          : "Dieses URL-Kürzel ist bereits vergeben.";
+      }
+      toast.error(msg);
       setLoading(false);
       return;
     }

@@ -9,6 +9,8 @@ export interface Profile {
   created_at: string;
 }
 
+export type ClubPlan = "free" | "unlimited";
+
 export interface Club {
   id: string;
   name: string;
@@ -17,8 +19,19 @@ export interface Club {
   is_public: boolean;
   logo_url: string | null;
   settings: Record<string, unknown>;
+  plan: ClubPlan;
   created_by: string;
   created_at: string;
+}
+
+export interface PlanConfig {
+  plan: ClubPlan;
+  max_clubs_per_user: number | null;
+  max_storage_bytes: number | null;
+  max_teilnehmer: number | null;
+  max_staff: number | null;
+  max_sessions_per_week: number | null;
+  max_media_per_session: number | null;
 }
 
 export interface ClubMembership {

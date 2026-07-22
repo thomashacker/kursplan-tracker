@@ -43,6 +43,7 @@ export function ManagersTable({ owners }: { owners: OwnerRow[] }) {
         <thead>
           <tr className="border-b border-border text-muted-foreground text-xs uppercase tracking-wider">
             <th className="text-left px-4 py-3 font-medium">Owner</th>
+            <th className="text-left px-3 py-3 font-medium">Plan</th>
             <th className="text-left px-3 py-3 font-medium">Seit</th>
             <th className="text-right px-3 py-3 font-medium">Vereine</th>
             <th className="text-right px-3 py-3 font-medium">Staff</th>
@@ -62,6 +63,17 @@ export function ManagersTable({ owners }: { owners: OwnerRow[] }) {
               className="border-b border-border/60 last:border-b-0 hover:bg-secondary/40 transition-colors"
             >
               <td className="px-4 py-3 text-foreground font-mono text-xs">{truncateId(o.ownerId)}</td>
+              <td className="px-3 py-3">
+                <span
+                  className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-full ${
+                    o.plan === "unlimited"
+                      ? "bg-primary/15 text-primary"
+                      : "bg-muted text-muted-foreground"
+                  }`}
+                >
+                  {o.plan}
+                </span>
+              </td>
               <td className="px-3 py-3 text-muted-foreground">{formatDate(o.ownerSince)}</td>
               <td className="px-3 py-3 text-right text-foreground">{o.clubCount}</td>
               <td className="px-3 py-3 text-right text-muted-foreground">{o.staffCount}</td>
