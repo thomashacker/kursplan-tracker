@@ -22,7 +22,7 @@ export default async function AdminDashboardPage() {
   // Global counts (parallel).
   const [profilesRes, clubsRes, membershipsRes] = await Promise.all([
     supabase.from("profiles").select("id, created_at"),
-    supabase.from("clubs").select("id, created_by, created_at"),
+    supabase.from("clubs").select("id, created_by, created_at, plan"),
     supabase
       .from("club_memberships")
       .select("club_id, user_id, role, joined_at, status")
@@ -107,6 +107,11 @@ export default async function AdminDashboardPage() {
       (m) => clubIdsOfOwner.has(m.club_id) && (m.role === "admin" || m.role === "trainer")
     ).length;
 
+    // Owner's plan surface: unlimited wins if ANY of their clubs is unlimited.
+    const plan: "free" | "unlimited" = ownerClubs.some((c) => c.plan === "unlimited")
+      ? "unlimited"
+      : "free";
+
     return {
       ownerId,
       ownerSince,
@@ -119,6 +124,7 @@ export default async function AdminDashboardPage() {
       mediaCount,
       staffCount,
       lastActivity,
+      plan,
     };
   }).sort((a, b) => (b.dbBytes + b.storageBytes) - (a.dbBytes + a.storageBytes));
 

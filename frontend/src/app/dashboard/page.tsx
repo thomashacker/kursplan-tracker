@@ -20,7 +20,17 @@ export default async function DashboardPage() {
 
   const userName = (user?.user_metadata?.full_name as string | undefined) ?? "";
   const userEmail = user?.email ?? "";
-  const canCreateClub = (user?.app_metadata?.can_create_club as boolean | undefined) === true;
+
+  // Self-service: anyone can create ONE free Verein. The DB enforces the
+  // rule via a partial unique index on clubs(created_by) WHERE plan='free'.
+  // Hide the "erstellen" button if the user has already created one; their
+  // unlimited-plan clubs (owner-operator grandfathered) don't count.
+  const { count: ownedFreeCount } = await supabase
+    .from("clubs")
+    .select("id", { count: "exact", head: true })
+    .eq("created_by", user!.id)
+    .eq("plan", "free");
+  const canCreateClub = (ownedFreeCount ?? 0) === 0;
 
   return <ClubList memberships={memberships ?? []} userName={userName} userEmail={userEmail} canCreateClub={canCreateClub} />;
 }

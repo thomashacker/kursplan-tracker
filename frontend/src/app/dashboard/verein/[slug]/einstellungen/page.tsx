@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import type { Club, ClubMembership } from "@/types";
 import { ClubSettingsForm } from "./ClubSettingsForm";
+import { UsagePanel } from "./UsagePanel";
 
 export default async function EinstellungenPage({
   params,
@@ -39,7 +40,10 @@ export default async function EinstellungenPage({
       >
         Vereinseinstellungen
       </h1>
-      <ClubSettingsForm club={club} />
+      <div className="space-y-8">
+        <ClubSettingsForm club={club} />
+        <UsagePanel club={club} />
+      </div>
     </div>
   );
 }
