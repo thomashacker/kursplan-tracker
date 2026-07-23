@@ -6,8 +6,10 @@ import dynamic from "next/dynamic";
 import { toast } from "sonner";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { createClient } from "@/lib/supabase/client";
-import type { Teilnehmer, TeilnehmerGroup, TeilnehmerQRPayload } from "@/types";
+import type { ClubPlan, Teilnehmer, TeilnehmerGroup, TeilnehmerQRPayload } from "@/types";
 import { Skeleton } from "@/components/ui/skeleton";
+import { LimitBadge } from "@/components/ui/limit-badge";
+import { useClubPlan } from "@/hooks/useClubPlan";
 
 const QRCodeCanvas = dynamic(() => import("./QRCodeCanvas"), { ssr: false });
 const QRScannerModal = dynamic(() => import("./QRScannerModal"), { ssr: false });
@@ -146,6 +148,8 @@ export default function TeilnehmerPage() {
 
   const [tab, setTab] = useState<Tab>("list");
   const [clubId, setClubId] = useState<string | null>(null);
+  const [clubPlan, setClubPlan] = useState<ClubPlan | null>(null);
+  const planCfg = useClubPlan(clubPlan);
 
   const [teilnehmer, setTeilnehmer] = useState<Teilnehmer[]>([]);
   const [groups, setGroups] = useState<TeilnehmerGroup[]>([]);
@@ -215,8 +219,9 @@ export default function TeilnehmerPage() {
   useEffect(() => {
     async function init() {
       const { data: { user } } = await supabase.auth.getUser();
-      const { data: club } = await supabase.from("clubs").select("id").eq("slug", slug).single();
+      const { data: club } = await supabase.from("clubs").select("id, plan").eq("slug", slug).single<{ id: string; plan: ClubPlan }>();
       if (!club) return;
+      setClubPlan(club.plan);
 
       const { data: membership } = await supabase
         .from("club_memberships")
@@ -529,9 +534,14 @@ export default function TeilnehmerPage() {
           >
             Teilnehmer
           </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {activeCount} aktiv{leftCount > 0 ? ` · ${leftCount} ausgetreten` : ""} · {groups.length} {groups.length === 1 ? "Gruppe" : "Gruppen"}
-          </p>
+          <div className="text-sm text-muted-foreground mt-0.5 flex items-center gap-2 flex-wrap">
+            <span>
+              {activeCount} aktiv{leftCount > 0 ? ` · ${leftCount} ausgetreten` : ""} · {groups.length} {groups.length === 1 ? "Gruppe" : "Gruppen"}
+            </span>
+            {planCfg && (
+              <LimitBadge used={activeCount} limit={planCfg.max_teilnehmer} label="Teilnehmer" />
+            )}
+          </div>
         </div>
       </div>
 

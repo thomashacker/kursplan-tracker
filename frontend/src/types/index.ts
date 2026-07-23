@@ -32,6 +32,8 @@ export interface PlanConfig {
   max_staff: number | null;
   max_sessions_per_week: number | null;
   max_media_per_session: number | null;
+  /** false: only 'link' media allowed. true: images + PDFs too. */
+  can_upload_files: boolean;
 }
 
 export interface ClubMembership {
@@ -168,9 +170,16 @@ export interface SessionMedia {
   created_at: string;
 }
 
-/** Per-session cap on attached media (enforced client-side; UI hides upload above it). */
+/**
+ * Per-session cap on attached media. Authoritative value lives in
+ * `public.plan_config.max_media_per_session` — this constant is a hard
+ * client-side ceiling only, safe for the "unlimited" plan where the DB
+ * cap is NULL. Actual per-club cap should be fetched at render time.
+ */
 export const SESSION_MEDIA_MAX = 5;
-export const SESSION_MEDIA_IMAGE_MAX_MB = 5;
+/** Per-file image cap before compression. Real footprint is much smaller
+ * (compressed to ~200–500 KB); this rejects clearly-oversized uploads. */
+export const SESSION_MEDIA_IMAGE_MAX_MB = 2;
 export const SESSION_MEDIA_PDF_MAX_MB   = 10;
 
 /** Common event-metadata field descriptors. Freeform jsonb so add-a-field is a one-line UI change. */
@@ -319,6 +328,34 @@ export interface TrainerAvailability {
   created_at: string;
   updated_at: string;
 }
+
+// ── Feedback (in-app bug reports / ideas) ────────────────────────────────
+
+export type FeedbackKind   = "bug" | "idea" | "other";
+export type FeedbackStatus = "open" | "solved" | "archived";
+
+export interface Feedback {
+  id: string;
+  kind: FeedbackKind;
+  message: string;
+  user_id: string | null;
+  club_id: string | null;
+  page_url: string | null;
+  user_agent: string | null;
+  status: FeedbackStatus;
+  created_at: string;
+  resolved_at: string | null;
+  resolved_by: string | null;
+  admin_note: string | null;
+}
+
+export const FEEDBACK_MESSAGE_MAX = 2000;
+
+export const FEEDBACK_KIND_LABELS: Record<FeedbackKind, string> = {
+  bug:   "Bug",
+  idea:  "Idee",
+  other: "Sonstiges",
+};
 
 export const SUGGESTED_TAGS = [
   "Technik",

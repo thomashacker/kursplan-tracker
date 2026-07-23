@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { Navbar } from "@/components/layout/Navbar";
 import { SiteFooter } from "@/components/layout/SiteFooter";
+import { FloatingHelpButton } from "@/components/feedback/FloatingHelpButton";
 
 export default async function DashboardLayout({
   children,
@@ -24,6 +25,7 @@ export default async function DashboardLayout({
         {children}
       </main>
       <SiteFooter />
+      <FloatingHelpButton />
     </div>
   );
 }

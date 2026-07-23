@@ -12,6 +12,7 @@ import {
 } from "@/types";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { LimitBadge } from "@/components/ui/limit-badge";
 
 interface Props {
   sessionId: string;
@@ -34,6 +35,8 @@ export function SessionMediaEditor({ sessionId, clubId }: Props) {
   const [linkCaption, setLinkCaption] = useState("");
   const [storageCap, setStorageCap] = useState<number | null>(null);
   const [storageUsed, setStorageUsed] = useState<number>(0);
+  const [mediaCap, setMediaCap] = useState<number>(SESSION_MEDIA_MAX);
+  const [canUploadFiles, setCanUploadFiles] = useState<boolean>(true);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const supabase = createClient();
@@ -56,11 +59,21 @@ export function SessionMediaEditor({ sessionId, clubId }: Props) {
   // Storage-cap gate: load the club's plan cap + latest snapshot so we can
   // reject uploads that would push over the limit. NULL cap = unlimited,
   // in which case we skip all checks.
+  // Load plan info for this club: media count cap, storage cap (only
+  // meaningful for plans that CAN upload), and the can_upload_files flag
+  // that decides whether image/pdf upload UI is shown at all.
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [{ data: capData }, { data: snapData }] = await Promise.all([
+      const [
+        { data: storageCapData },
+        { data: mediaCapData },
+        { data: canUploadData },
+        { data: snapData },
+      ] = await Promise.all([
         supabase.rpc("plan_limit", { p_club_id: clubId, p_resource: "storage_bytes" }),
+        supabase.rpc("plan_limit", { p_club_id: clubId, p_resource: "media_per_session" }),
+        supabase.rpc("club_can_upload_files", { p_club_id: clubId }),
         supabase
           .from("usage_snapshots")
           .select("storage_bytes")
@@ -69,15 +82,17 @@ export function SessionMediaEditor({ sessionId, clubId }: Props) {
           .limit(1),
       ]);
       if (cancelled) return;
-      setStorageCap(capData == null ? null : Number(capData));
+      setStorageCap(storageCapData == null ? null : Number(storageCapData));
+      setMediaCap(mediaCapData == null ? SESSION_MEDIA_MAX : Number(mediaCapData));
       setStorageUsed(Number(snapData?.[0]?.storage_bytes ?? 0));
+      setCanUploadFiles(Boolean(canUploadData));
     })();
     return () => {
       cancelled = true;
     };
   }, [clubId, supabase]);
 
-  const atCap = rows.length >= SESSION_MEDIA_MAX;
+  const atCap = rows.length >= mediaCap;
 
   async function insertRow(kind: SessionMediaKind, url: string, caption: string | null) {
     const { data: { user } } = await supabase.auth.getUser();
@@ -101,8 +116,8 @@ export function SessionMediaEditor({ sessionId, clubId }: Props) {
 
     setUploading(true);
     for (const file of files) {
-      if (rows.length + 1 > SESSION_MEDIA_MAX) {
-        toast.error(`Maximal ${SESSION_MEDIA_MAX} Anhänge pro Sitzung.`);
+      if (rows.length + 1 > mediaCap) {
+        toast.error(`Maximal ${mediaCap} Anhang${mediaCap === 1 ? "" : "änge"} pro Sitzung.`);
         break;
       }
 
@@ -165,8 +180,8 @@ export function SessionMediaEditor({ sessionId, clubId }: Props) {
   async function handleAddLink() {
     const url = linkUrl.trim();
     if (!url) return;
-    if (rows.length >= SESSION_MEDIA_MAX) {
-      toast.error(`Maximal ${SESSION_MEDIA_MAX} Anhänge pro Sitzung.`);
+    if (rows.length >= mediaCap) {
+      toast.error(`Maximal ${mediaCap} Anhang${mediaCap === 1 ? "" : "änge"} pro Sitzung.`);
       return;
     }
     await insertRow("link", url, linkCaption.trim() || null);
@@ -198,7 +213,7 @@ export function SessionMediaEditor({ sessionId, clubId }: Props) {
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Anhänge</Label>
-        <span className="text-[10px] text-muted-foreground">{rows.length} / {SESSION_MEDIA_MAX}</span>
+        <LimitBadge used={rows.length} limit={mediaCap} compact />
       </div>
 
       {loading ? (
@@ -235,7 +250,7 @@ export function SessionMediaEditor({ sessionId, clubId }: Props) {
         </div>
       )}
 
-      {!atCap && (
+      {!atCap && canUploadFiles && (
         <div className="flex flex-col sm:flex-row gap-2 pt-1">
           <button
             type="button"
