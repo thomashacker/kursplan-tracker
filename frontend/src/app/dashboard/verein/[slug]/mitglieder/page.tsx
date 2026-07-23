@@ -18,6 +18,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { AbsenceManagerDialog } from "@/components/trainer/AbsenceManagerDialog";
+import { LimitBadge } from "@/components/ui/limit-badge";
+import { useClubPlan } from "@/hooks/useClubPlan";
 
 const spring = { type: "spring" as const, stiffness: 300, damping: 28 };
 
@@ -30,6 +32,30 @@ const ROLE_OPTIONS: { value: Role; label: string; description: string }[] = [
 function formatIsoShort(iso: string): string {
   const [y, m, d] = iso.split("-");
   return `${d}.${m}.${y}`;
+}
+
+/**
+ * Small wrapper so the calling parent doesn't have to compute the staff
+ * count + call the useClubPlan hook inline. Keeps the hook usage adjacent
+ * to what it renders.
+ */
+function StaffLimitBadge({
+  memberships,
+  clubPlan,
+}: {
+  memberships: ClubMembership[];
+  clubPlan: import("@/types").ClubPlan | null;
+}) {
+  const planCfg = useClubPlan(clubPlan);
+  if (!planCfg) return null;
+  const staffCount = memberships.filter(
+    (m) => m.status === "active" && (m.role === "admin" || m.role === "trainer"),
+  ).length;
+  return (
+    <div className="mt-1.5">
+      <LimitBadge used={staffCount} limit={planCfg.max_staff} label="Trainer & Admins" />
+    </div>
+  );
 }
 
 function RoleBadge({ role }: { role: Role }) {
@@ -344,12 +370,15 @@ export default function MitgliederPage() {
     <div>
       {/* ── Header ──────────────────────────────────────────── */}
       <div className="flex items-center justify-between gap-4 mb-8">
-        <h1
-          className="font-bold tracking-tight"
-          style={{ fontFamily: "var(--font-syne, system-ui)", fontSize: "clamp(1.5rem, 5vw, 2rem)" }}
-        >
-          Mitglieder
-        </h1>
+        <div className="min-w-0">
+          <h1
+            className="font-bold tracking-tight"
+            style={{ fontFamily: "var(--font-syne, system-ui)", fontSize: "clamp(1.5rem, 5vw, 2rem)" }}
+          >
+            Mitglieder
+          </h1>
+          <StaffLimitBadge memberships={memberships} clubPlan={club?.plan ?? null} />
+        </div>
         {isAdmin && (
           <motion.button
             whileTap={reduced ? {} : { scale: 0.97 }}

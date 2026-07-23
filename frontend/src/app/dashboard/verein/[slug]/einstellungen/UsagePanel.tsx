@@ -61,7 +61,11 @@ export function UsagePanel({ club }: { club: Club }) {
         latestSnapshot,
         currentWeek,
       ] = await Promise.all([
-        supabase.from("plan_config").select("*").eq("plan", club.plan).single<PlanConfig>(),
+        supabase
+          .from("plan_config")
+          .select("*")
+          .eq("plan", club.plan)
+          .single<PlanConfig>(),
         supabase
           .from("teilnehmer")
           .select("id", { count: "exact", head: true })
@@ -102,10 +106,34 @@ export function UsagePanel({ club }: { club: Club }) {
       setPlanConfig(config);
       const storageBytes = Number(latestSnapshot.data?.[0]?.storage_bytes ?? 0);
       const built: UsageRow[] = [
-        { label: "Speicher (Fotos, PDFs)", used: storageBytes, limit: config.max_storage_bytes, format: formatBytes },
-        { label: "Aktive Teilnehmer",       used: teilCount ?? 0, limit: config.max_teilnehmer },
-        { label: "Trainer & Admins",        used: staffCount ?? 0, limit: config.max_staff },
-        { label: "Trainings diese Woche",   used: currentWeek.data as number, limit: config.max_sessions_per_week },
+        // Storage row only appears if this plan has a numeric cap. Free
+        // plans (post-migration 032) have max_storage_bytes = NULL because
+        // uploads are disabled entirely — no bar to draw.
+        ...(config.max_storage_bytes != null
+          ? [
+              {
+                label: "Speicher (Fotos, PDFs)",
+                used: storageBytes,
+                limit: config.max_storage_bytes,
+                format: formatBytes,
+              },
+            ]
+          : []),
+        {
+          label: "Aktive Teilnehmer",
+          used: teilCount ?? 0,
+          limit: config.max_teilnehmer,
+        },
+        {
+          label: "Trainer & Admins",
+          used: staffCount ?? 0,
+          limit: config.max_staff,
+        },
+        {
+          label: "Trainings diese Woche",
+          used: currentWeek.data as number,
+          limit: config.max_sessions_per_week,
+        },
       ];
       setRows(built);
     }
@@ -160,7 +188,9 @@ export function UsagePanel({ club }: { club: Club }) {
             <div key={r.label}>
               <div className="flex items-baseline justify-between mb-1.5">
                 <span className="text-sm text-foreground">{r.label}</span>
-                <span className={`text-xs tabular-nums font-medium ${danger ? "text-destructive" : "text-muted-foreground"}`}>
+                <span
+                  className={`text-xs tabular-nums font-medium ${danger ? "text-destructive" : "text-muted-foreground"}`}
+                >
                   {fmt(r.used)} / {fmt(limit)}
                 </span>
               </div>
@@ -169,10 +199,6 @@ export function UsagePanel({ club }: { club: Club }) {
           );
         })}
       </div>
-      <p className="text-[11px] text-muted-foreground mt-4 leading-relaxed">
-        Speicher-Wert stammt aus der nächtlichen Auswertung (täglich 03:00 UTC).
-        Neu hochgeladene Dateien erscheinen erst am Folgetag.
-      </p>
     </div>
   );
 }

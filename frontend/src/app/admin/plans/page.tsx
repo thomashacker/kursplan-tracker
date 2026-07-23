@@ -11,16 +11,18 @@ export default async function AdminPlansPage() {
     .returns<PlanConfig[]>();
 
   return (
-    <div className="max-w-2xl">
-      <h1
-        className="font-bold tracking-tight mb-1"
-        style={{ fontFamily: "var(--font-syne, system-ui)", fontSize: "clamp(1.75rem, 6vw, 2.25rem)" }}
-      >
-        Plan-Konfiguration
-      </h1>
-      <p className="text-sm text-muted-foreground mb-8">
-        Grenzen pro Plan. NULL = keine Grenze.
-      </p>
+    <div>
+      <div className="mb-6">
+        <h1
+          className="font-bold tracking-tight leading-none"
+          style={{ fontFamily: "var(--font-syne, system-ui)", fontSize: "clamp(1.5rem, 4vw, 2rem)" }}
+        >
+          Plan-Konfiguration
+        </h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          Grenzen pro Plan. NULL = keine Grenze.
+        </p>
+      </div>
       <PlanConfigEditor plans={data ?? []} />
     </div>
   );

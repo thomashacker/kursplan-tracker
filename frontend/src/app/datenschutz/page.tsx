@@ -62,6 +62,7 @@ export default function DatenschutzPage() {
               { href: "#rechte", label: "Rechte der betroffenen Personen" },
               { href: "#webhosting", label: "Bereitstellung des Onlineangebots und Webhosting" },
               { href: "#betriebsanalyse", label: "Betriebs- und Nutzungsanalyse" },
+              { href: "#feedback", label: "In-App-Feedback" },
               { href: "#minderjaehrige", label: "Besondere Hinweise für minderjährige Nutzer" },
               { href: "#registrierung", label: "Registrierung, Anmeldung und Nutzerkonto" },
               { href: "#vereinsmitglieder", label: "Verarbeitung von Vereinsmitgliederdaten" },
@@ -426,6 +427,30 @@ export default function DatenschutzPage() {
                 <dd>Berechtigte Interessen (Art.&nbsp;6 Abs.&nbsp;1 lit.&nbsp;f DSGVO)</dd>
               </div>
             </dl>
+          </div>
+        </section>
+
+        {/* In-App-Feedback */}
+        <section id="feedback" className="space-y-3 scroll-mt-6">
+          <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+            In-App-Feedback
+          </h2>
+          <div className="text-sm leading-relaxed text-muted-foreground space-y-3">
+            <p>
+              Über den Hilfe-Button in der App können angemeldete Nutzer Bug-Reports,
+              Ideen oder sonstige Rückmeldungen an den Betreiber senden. Bei jeder
+              Meldung werden gespeichert: die Nachricht selbst, deine User-ID, der
+              aktuelle Pfad in der App (z.&nbsp;B. <code>/dashboard/verein/…</code>),
+              die Browser-Kennung (User-Agent) und der Zeitpunkt. Diese Angaben
+              dienen ausschließlich der Fehleranalyse und Produktverbesserung.
+            </p>
+            <p>
+              Eine E-Mail-Adresse wird nicht abgefragt. Es gibt keinen automatischen
+              Antwort-Kanal — der Betreiber liest die Meldungen und reagiert
+              gegebenenfalls durch App-Änderungen. Rechtsgrundlage: Art.&nbsp;6
+              Abs.&nbsp;1 lit.&nbsp;f DSGVO (berechtigtes Interesse an
+              Produktverbesserung und Fehlerbehebung).
+            </p>
           </div>
         </section>
 

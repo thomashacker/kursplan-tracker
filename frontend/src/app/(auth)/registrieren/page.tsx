@@ -42,6 +42,7 @@ export default function RegistrierenPage() {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [termsAccepted, setTermsAccepted] = useState(false);
+  const [ageConfirmed, setAgeConfirmed] = useState(false);
 
   // Email: only check once "@" has been typed (feels less aggressive)
   const emailOk = EMAIL_RE.test(email);
@@ -59,7 +60,7 @@ export default function RegistrierenPage() {
     ? "Passwörter stimmen nicht überein"
     : null;
 
-  const canSubmit = emailOk && passwordOk && confirmOk && termsAccepted;
+  const canSubmit = emailOk && passwordOk && confirmOk && termsAccepted && ageConfirmed;
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -191,6 +192,33 @@ export default function RegistrierenPage() {
           />
           <FieldError message={confirmError} />
         </div>
+
+        {/* Age confirmation — DSGVO Art. 8 / AGB § 3: registration ≥ 16 */}
+        <label className="flex items-start gap-3 cursor-pointer group">
+          <div className="relative mt-0.5 shrink-0">
+            <input
+              type="checkbox"
+              className="sr-only peer"
+              checked={ageConfirmed}
+              onChange={(e) => setAgeConfirmed(e.target.checked)}
+              required
+            />
+            <div className={`w-5 h-5 rounded-md border-2 transition-colors flex items-center justify-center ${
+              ageConfirmed
+                ? "border-primary bg-primary"
+                : "border-border bg-background group-hover:border-primary/50"
+            }`}>
+              {ageConfirmed && (
+                <svg width="10" height="8" viewBox="0 0 10 8" fill="none" aria-hidden>
+                  <path d="M1 4L3.5 6.5L9 1" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              )}
+            </div>
+          </div>
+          <span className="text-sm text-muted-foreground leading-snug">
+            Ich bin mindestens <span className="font-medium text-foreground">16 Jahre alt</span> oder habe die Einwilligung eines Erziehungsberechtigten.
+          </span>
+        </label>
 
         {/* Terms acceptance */}
         <label className="flex items-start gap-3 cursor-pointer group">
